@@ -44,24 +44,35 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Download native binaries from gnubg release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          OWNER="${{ github.repository_owner }}"
+          REPO="gnubg"
           mkdir -p runtimes/win-x64/native runtimes/linux-x64/native
 
           if [ "$GNUBG_TAG" = "latest" ]; then
-            TAG_FLAG="--pattern '*.dll' --pattern '*.so'"
-            echo "Downloading from latest release..."
-            gh release download --repo ${{ github.repository_owner }}/gnubg \
-              --pattern 'libgnubgapi.dll' --dir runtimes/win-x64/native || true
-            gh release download --repo ${{ github.repository_owner }}/gnubg \
-              --pattern 'libgnubgapi.so' --dir runtimes/linux-x64/native || true
+            API_URL="https://api.github.com/repos/${OWNER}/${REPO}/releases/latest"
           else
-            echo "Downloading from tag $GNUBG_TAG..."
-            gh release download "$GNUBG_TAG" --repo ${{ github.repository_owner }}/gnubg \
-              --pattern 'libgnubgapi.dll' --dir runtimes/win-x64/native || true
-            gh release download "$GNUBG_TAG" --repo ${{ github.repository_owner }}/gnubg \
-              --pattern 'libgnubgapi.so' --dir runtimes/linux-x64/native || true
+            API_URL="https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/${GNUBG_TAG}"
+          fi
+
+          echo "Fetching release info from $API_URL"
+          RELEASE_JSON=$(curl -sL "$API_URL")
+
+          DLL_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name == "libgnubgapi.dll") | .browser_download_url')
+          SO_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name == "libgnubgapi.so") | .browser_download_url')
+
+          if [ -n "$DLL_URL" ] && [ "$DLL_URL" != "null" ]; then
+            echo "Downloading $DLL_URL"
+            curl -sL -o runtimes/win-x64/native/libgnubgapi.dll "$DLL_URL"
+          else
+            echo "::warning::libgnubgapi.dll not found in release"
+          fi
+
+          if [ -n "$SO_URL" ] && [ "$SO_URL" != "null" ]; then
+            echo "Downloading $SO_URL"
+            curl -sL -o runtimes/linux-x64/native/libgnubgapi.so "$SO_URL"
+          else
+            echo "::warning::libgnubgapi.so not found in release"
           fi
 
           echo "=== Native binaries ==="
