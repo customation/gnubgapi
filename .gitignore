@@ -416,3 +416,11 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Local dotnet CLI home
+.dotnet/
+
+# Native binaries (fetched by CI or fetch-natives.ps1)
+runtimes/*/native/*.dll
+runtimes/*/native/*.so
+runtimes/*/native/*.dylib

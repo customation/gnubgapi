@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/GammonBase.GnuBgApi/GammonBase.GnuBgApi.csproj" />
+  <Project Path="src/GammonBase.GnuBgApi.TestHarness/GammonBase.GnuBgApi.TestHarness.csproj" />
+</Solution>

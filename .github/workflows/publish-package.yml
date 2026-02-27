@@ -1,0 +1,117 @@
+name: Publish NuGet Package (GitHub Packages)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_prefix:
+        description: "Major.Minor version prefix (e.g. 0.1)"
+        required: false
+        default: "0.1"
+      gnubg_tag:
+        description: "gnubg release tag for native binaries (e.g. v0.1.0)"
+        required: false
+        default: "latest"
+  push:
+    branches: [ master ]
+    paths:
+      - 'src/**'
+      - '.github/workflows/publish-package.yml'
+
+concurrency:
+  group: nuget-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  VERSION_PREFIX: ${{ github.event.inputs.version_prefix || '0.1' }}
+  GNUBG_TAG: ${{ github.event.inputs.gnubg_tag || 'latest' }}
+  CONFIGURATION: Release
+  DOTNET_VERSION: '10.0.x'
+
+jobs:
+  pack-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Download native binaries from gnubg release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p runtimes/win-x64/native runtimes/linux-x64/native
+
+          if [ "$GNUBG_TAG" = "latest" ]; then
+            TAG_FLAG="--pattern '*.dll' --pattern '*.so'"
+            echo "Downloading from latest release..."
+            gh release download --repo ${{ github.repository_owner }}/gnubg \
+              --pattern 'libgnubgapi.dll' --dir runtimes/win-x64/native || true
+            gh release download --repo ${{ github.repository_owner }}/gnubg \
+              --pattern 'libgnubgapi.so' --dir runtimes/linux-x64/native || true
+          else
+            echo "Downloading from tag $GNUBG_TAG..."
+            gh release download "$GNUBG_TAG" --repo ${{ github.repository_owner }}/gnubg \
+              --pattern 'libgnubgapi.dll' --dir runtimes/win-x64/native || true
+            gh release download "$GNUBG_TAG" --repo ${{ github.repository_owner }}/gnubg \
+              --pattern 'libgnubgapi.so' --dir runtimes/linux-x64/native || true
+          fi
+
+          echo "=== Native binaries ==="
+          find runtimes -type f -ls
+
+      - name: Compute version
+        run: |
+          VERSION="${VERSION_PREFIX}.${GITHUB_RUN_NUMBER}"
+          echo "PACKAGE_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Package version: $VERSION"
+
+      - name: Create nuget.config
+        run: |
+          cat > nuget.config <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <add key="github" value="https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" />
+            </packageSources>
+            <packageSourceCredentials>
+              <github>
+                <add key="Username" value="${{ github.repository_owner }}" />
+                <add key="ClearTextPassword" value="${{ secrets.GITHUB_TOKEN }}" />
+              </github>
+            </packageSourceCredentials>
+          </configuration>
+          EOF
+
+      - name: Pack
+        run: |
+          dotnet pack src/GammonBase.GnuBgApi/GammonBase.GnuBgApi.csproj \
+            -c $CONFIGURATION \
+            -p:PackageVersion=$PACKAGE_VERSION \
+            -p:ContinuousIntegrationBuild=true \
+            -o artifacts
+          ls -la artifacts/
+
+      - name: Push to GitHub Packages
+        run: |
+          for nupkg in artifacts/*.nupkg; do
+            echo "Pushing $nupkg"
+            dotnet nuget push "$nupkg" \
+              --source "github" \
+              --api-key ${{ secrets.GITHUB_TOKEN }} \
+              --skip-duplicate
+          done
+
+      - name: Summary
+        run: |
+          echo "Published version: $PACKAGE_VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Native binaries included:" >> $GITHUB_STEP_SUMMARY
+          find runtimes -type f -name '*.dll' -o -name '*.so' | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
