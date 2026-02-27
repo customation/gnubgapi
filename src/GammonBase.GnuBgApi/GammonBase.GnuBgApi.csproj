@@ -20,4 +20,16 @@
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\..\runtimes\**\*" Pack="true" PackagePath="runtimes\" />
   </ItemGroup>
+
+  <!-- Copy native binaries (+ runtime deps) to output for project-reference and local dev -->
+  <ItemGroup>
+    <None Include="..\..\runtimes\win-x64\native\*.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          LinkBase=""
+          Visible="false" />
+    <None Include="..\..\runtimes\linux-x64\native\*.so"
+          CopyToOutputDirectory="PreserveNewest"
+          LinkBase=""
+          Visible="false" />
+  </ItemGroup>
 </Project>
