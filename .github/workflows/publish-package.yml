@@ -7,14 +7,11 @@ on:
         description: "Major.Minor version prefix (e.g. 0.1)"
         required: false
         default: "0.1"
-      gnubg_tag:
-        description: "gnubg release tag for native binaries (e.g. v0.1.0)"
-        required: false
-        default: "latest"
   push:
     branches: [ master ]
     paths:
       - 'src/**'
+      - 'runtimes/**'
       - '.github/workflows/publish-package.yml'
 
 concurrency:
@@ -23,7 +20,6 @@ concurrency:
 
 env:
   VERSION_PREFIX: ${{ github.event.inputs.version_prefix || '0.1' }}
-  GNUBG_TAG: ${{ github.event.inputs.gnubg_tag || 'latest' }}
   CONFIGURATION: Release
   DOTNET_VERSION: '10.0.x'
 
@@ -43,40 +39,18 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Download native binaries from gnubg release
+      - name: Verify native binaries
         run: |
-          OWNER="${{ github.repository_owner }}"
-          REPO="gnubg"
-          mkdir -p runtimes/win-x64/native runtimes/linux-x64/native
-
-          if [ "$GNUBG_TAG" = "latest" ]; then
-            API_URL="https://api.github.com/repos/${OWNER}/${REPO}/releases/latest"
-          else
-            API_URL="https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/${GNUBG_TAG}"
-          fi
-
-          echo "Fetching release info from $API_URL"
-          RELEASE_JSON=$(curl -sL "$API_URL")
-
-          DLL_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name == "libgnubgapi.dll") | .browser_download_url')
-          SO_URL=$(echo "$RELEASE_JSON" | jq -r '.assets[] | select(.name == "libgnubgapi.so") | .browser_download_url')
-
-          if [ -n "$DLL_URL" ] && [ "$DLL_URL" != "null" ]; then
-            echo "Downloading $DLL_URL"
-            curl -sL -o runtimes/win-x64/native/libgnubgapi.dll "$DLL_URL"
-          else
-            echo "::warning::libgnubgapi.dll not found in release"
-          fi
-
-          if [ -n "$SO_URL" ] && [ "$SO_URL" != "null" ]; then
-            echo "Downloading $SO_URL"
-            curl -sL -o runtimes/linux-x64/native/libgnubgapi.so "$SO_URL"
-          else
-            echo "::warning::libgnubgapi.so not found in release"
-          fi
-
           echo "=== Native binaries ==="
-          find runtimes -type f -ls
+          find runtimes -type f -name '*.dll' -o -name '*.so' | while read f; do
+            echo "  $f ($(stat --printf='%s' "$f") bytes)"
+          done
+          # Fail if no native binaries found
+          count=$(find runtimes -type f \( -name '*.dll' -o -name '*.so' \) | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No native binaries found in runtimes/"
+            exit 1
+          fi
 
       - name: Compute version
         run: |

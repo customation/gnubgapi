@@ -420,7 +420,5 @@ FodyWeavers.xsd
 # Local dotnet CLI home
 .dotnet/
 
-# Native binaries (fetched by CI or fetch-natives.ps1)
-runtimes/*/native/*.dll
-runtimes/*/native/*.so
-runtimes/*/native/*.dylib
+# Native binaries are committed to the repo since the gnubg fork is private.
+# Update them by running fetch-natives.ps1 or copying from a gnubg build.
