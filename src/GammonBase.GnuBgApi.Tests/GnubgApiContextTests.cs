@@ -230,4 +230,140 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
             Assert.InRange(result.CubefulEquity, -3.0, 3.0);
         }
     }
+
+    // ── Rollout tests ────────────────────────────────────────────────
+
+    [Fact]
+    public void RolloutPosition_OpeningPosition_ReturnsFiniteValues()
+    {
+        var ctx = GetContext();
+
+        var settings = new RolloutSettings { Trials = 36 }; // Small rollout for speed
+        var result = ctx.RolloutPosition("4HPwATDgc/ABMA", settings: settings);
+
+        Assert.True(double.IsFinite(result.WinProbability),
+            $"WinProbability is not finite: {result.WinProbability}");
+        Assert.True(double.IsFinite(result.CubelessEquity),
+            $"CubelessEquity is not finite: {result.CubelessEquity}");
+        Assert.True(double.IsFinite(result.CubefulEquity),
+            $"CubefulEquity is not finite: {result.CubefulEquity}");
+    }
+
+    [Fact]
+    public void RolloutPosition_OpeningPosition_WinProbabilityInRange()
+    {
+        var ctx = GetContext();
+
+        var settings = new RolloutSettings { Trials = 36 };
+        var result = ctx.RolloutPosition("4HPwATDgc/ABMA", settings: settings);
+
+        // Opening position should be close to 50/50
+        Assert.InRange(result.WinProbability, 0.30, 0.70);
+    }
+
+    [Fact]
+    public void RolloutPosition_OpeningPosition_ProbabilitiesSumCorrectly()
+    {
+        var ctx = GetContext();
+
+        var settings = new RolloutSettings { Trials = 36 };
+        var result = ctx.RolloutPosition("4HPwATDgc/ABMA", settings: settings);
+
+        // P(win) should be >= P(win gammon) >= P(win backgammon)
+        Assert.True(result.WinProbability >= result.WinGammonProbability,
+            $"Win ({result.WinProbability}) < WinGammon ({result.WinGammonProbability})");
+        Assert.True(result.WinGammonProbability >= result.WinBackgammonProbability,
+            $"WinGammon ({result.WinGammonProbability}) < WinBackgammon ({result.WinBackgammonProbability})");
+
+        // Same for losing side: P(lose) >= P(lose gammon) >= P(lose backgammon)
+        var loseProbability = 1.0 - result.WinProbability;
+        Assert.True(loseProbability >= result.LoseGammonProbability,
+            $"Lose ({loseProbability}) < LoseGammon ({result.LoseGammonProbability})");
+        Assert.True(result.LoseGammonProbability >= result.LoseBackgammonProbability,
+            $"LoseGammon ({result.LoseGammonProbability}) < LoseBackgammon ({result.LoseBackgammonProbability})");
+    }
+
+    [Fact]
+    public void RolloutPosition_OpeningPosition_StdDevsArePositive()
+    {
+        var ctx = GetContext();
+
+        var settings = new RolloutSettings { Trials = 36 };
+        var result = ctx.RolloutPosition("4HPwATDgc/ABMA", settings: settings);
+
+        Assert.True(result.WinProbabilityStdDev >= 0,
+            $"WinProbabilityStdDev is negative: {result.WinProbabilityStdDev}");
+        Assert.True(result.CubelessEquityStdDev >= 0,
+            $"CubelessEquityStdDev is negative: {result.CubelessEquityStdDev}");
+        Assert.True(result.CubefulEquityStdDev >= 0,
+            $"CubefulEquityStdDev is negative: {result.CubefulEquityStdDev}");
+    }
+
+    [Fact]
+    public void RolloutPosition_WithMatchId_ReturnsFiniteValues()
+    {
+        var ctx = GetContext();
+
+        var settings = new RolloutSettings { Trials = 36 };
+        // 5-point match, score 0-0
+        var result = ctx.RolloutPosition("4HPwATDgc/ABMA", "cAkAAAAAAAAA", settings);
+
+        Assert.True(double.IsFinite(result.CubelessEquity),
+            $"CubelessEquity is not finite: {result.CubelessEquity}");
+        Assert.True(double.IsFinite(result.CubefulEquity),
+            $"CubefulEquity is not finite: {result.CubefulEquity}");
+    }
+
+    [Fact]
+    public void RolloutPosition_DefaultSettings_Uses1296Trials()
+    {
+        var ctx = GetContext();
+
+        // This test verifies that null settings uses defaults (1296 trials).
+        // Just confirm it doesn't throw — the actual trial count is internal.
+        var result = ctx.RolloutPosition("4HPwATDgc/ABMA");
+
+        Assert.True(double.IsFinite(result.CubelessEquity),
+            $"CubelessEquity is not finite: {result.CubelessEquity}");
+    }
+
+    [Fact]
+    public void RolloutPosition_MoreTrials_ReducesStdDev()
+    {
+        var ctx = GetContext();
+
+        var small = new RolloutSettings { Trials = 36 };
+        var large = new RolloutSettings { Trials = 324 };
+
+        var resultSmall = ctx.RolloutPosition("4HPwATDgc/ABMA", settings: small);
+        var resultLarge = ctx.RolloutPosition("4HPwATDgc/ABMA", settings: large);
+
+        // With more trials, standard deviation should generally be smaller.
+        // This is a statistical property, so we use a generous margin.
+        // With 324 vs 36 trials (9x more), stddev should be ~3x smaller.
+        Assert.True(resultLarge.CubelessEquityStdDev < resultSmall.CubelessEquityStdDev * 1.5,
+            $"More trials didn't reduce stddev: {resultLarge.CubelessEquityStdDev} vs {resultSmall.CubelessEquityStdDev}");
+    }
+
+    [Fact]
+    public void RolloutPosition_NullPositionId_ThrowsArgumentException()
+    {
+        var ctx = GetContext();
+        Assert.Throws<ArgumentException>(() => ctx.RolloutPosition(null!));
+    }
+
+    [Fact]
+    public void RolloutPosition_EmptyPositionId_ThrowsArgumentException()
+    {
+        var ctx = GetContext();
+        Assert.Throws<ArgumentException>(() => ctx.RolloutPosition(""));
+    }
+
+    [Fact]
+    public void RolloutPosition_InvalidPositionId_ThrowsGnubgApiException()
+    {
+        var ctx = GetContext();
+        var settings = new RolloutSettings { Trials = 36 };
+        Assert.Throws<GnubgApiException>(() => ctx.RolloutPosition("garbage", settings: settings));
+    }
 }

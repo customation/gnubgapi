@@ -4,9 +4,29 @@ using System.Runtime.InteropServices;
 
 namespace GammonBase.Gnubg.Native;
 
+/// <summary>
+/// Mirrors the native <c>gnubgapi_rollout_settings</c> struct layout.
+/// Must be kept in sync with <c>gnubgapi.h</c>.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeRolloutSettings
+{
+    public uint NTrials;
+    public int Cubeful;
+    public int VarianceReduction;
+    public uint ChequerPlies;
+    public uint CubePlies;
+    public uint Seed;
+    public int Truncate;
+    public uint TruncatePlies;
+}
+
 internal static partial class GnubgApiNative
 {
     private const string LibraryName = "gnubgapi";
+
+    /// <summary>Number of output values from a rollout (matches <c>GNUBGAPI_NUM_ROLLOUT_OUTPUTS</c>).</summary>
+    internal const int NumRolloutOutputs = 7;
 
     static GnubgApiNative()
     {
@@ -73,4 +93,16 @@ internal static partial class GnubgApiNative
         string? matchId,
         out double equity,
         out double cubefulEquity);
+
+    [LibraryImport(LibraryName)]
+    internal static partial void gnubgapi_rollout_settings_default(ref NativeRolloutSettings settings);
+
+    [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static unsafe partial GnubgApiStatus gnubgapi_rollout_position(
+        IntPtr ctx,
+        string positionId,
+        string? matchId,
+        in NativeRolloutSettings settings,
+        double* outOutput,
+        double* outStdDev);
 }

@@ -76,6 +76,45 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
         return new GnubgEvaluationResult(equity, cubeful);
     }
 
+    /// <summary>Runs a Monte Carlo rollout of the given position.</summary>
+    /// <param name="positionId">GNU Backgammon position ID string.</param>
+    /// <param name="matchId">Optional match ID for match-play rollouts.</param>
+    /// <param name="settings">Rollout configuration. Pass <c>null</c> to use defaults (1 296 trials, cubeful, 0-ply chequer, 2-ply cube).</param>
+    /// <returns>A <see cref="GnubgRolloutResult"/> with mean outputs and standard deviations.</returns>
+    /// <exception cref="GnubgApiException">Thrown when the rollout fails.</exception>
+    public unsafe GnubgRolloutResult RolloutPosition(string positionId, string? matchId = null, RolloutSettings? settings = null)
+    {
+        if (string.IsNullOrWhiteSpace(positionId))
+        {
+            throw new ArgumentException("positionId is required", nameof(positionId));
+        }
+
+        var native = (settings ?? RolloutSettings.Default).ToNative();
+
+        double* output = stackalloc double[GnubgApiNative.NumRolloutOutputs];
+        double* stdDev = stackalloc double[GnubgApiNative.NumRolloutOutputs];
+
+        var status = GnubgApiNative.gnubgapi_rollout_position(handle, positionId, matchId, in native, output, stdDev);
+        GnubgApiNativeHelpers.ThrowIfNotOk(status);
+
+        return new GnubgRolloutResult(
+            WinProbability: output[0],
+            WinGammonProbability: output[1],
+            WinBackgammonProbability: output[2],
+            LoseGammonProbability: output[3],
+            LoseBackgammonProbability: output[4],
+            CubelessEquity: output[5],
+            CubefulEquity: output[6],
+            WinProbabilityStdDev: stdDev[0],
+            WinGammonProbabilityStdDev: stdDev[1],
+            WinBackgammonProbabilityStdDev: stdDev[2],
+            LoseGammonProbabilityStdDev: stdDev[3],
+            LoseBackgammonProbabilityStdDev: stdDev[4],
+            CubelessEquityStdDev: stdDev[5],
+            CubefulEquityStdDev: stdDev[6]
+        );
+    }
+
     /// <inheritdoc />
     protected override bool ReleaseHandle()
     {
@@ -98,6 +137,81 @@ public sealed class GnubgApiException : Exception
 /// <param name="Equity">Money-game equity (positive favours the player on roll).</param>
 /// <param name="CubefulEquity">Cubeful equity accounting for cube ownership and match score.</param>
 public readonly record struct GnubgEvaluationResult(double Equity, double CubefulEquity);
+
+/// <summary>Configuration for a Monte Carlo rollout.</summary>
+public sealed class RolloutSettings
+{
+    /// <summary>Number of games to simulate. Default is 1 296 (36²).</summary>
+    public uint Trials { get; init; } = 1296;
+
+    /// <summary>Whether to use cubeful rollout. Default is <c>true</c>.</summary>
+    public bool Cubeful { get; init; } = true;
+
+    /// <summary>Whether to use variance reduction. Default is <c>true</c>.</summary>
+    public bool VarianceReduction { get; init; } = true;
+
+    /// <summary>Number of plies for chequer (move) decisions during the rollout. Default is 0.</summary>
+    public uint ChequerPlies { get; init; } = 0;
+
+    /// <summary>Number of plies for cube decisions during the rollout. Default is 2.</summary>
+    public uint CubePlies { get; init; } = 2;
+
+    /// <summary>Random seed. 0 uses the default seed.</summary>
+    public uint Seed { get; init; } = 0;
+
+    /// <summary>Whether to truncate the rollout with bearoff evaluation. Default is <c>true</c>.</summary>
+    public bool Truncate { get; init; } = true;
+
+    /// <summary>Ply at which to truncate. Default is 10.</summary>
+    public uint TruncatePlies { get; init; } = 10;
+
+    /// <summary>Default rollout settings: 1 296 trials, cubeful, variance reduction, 0-ply chequer, 2-ply cube.</summary>
+    public static RolloutSettings Default { get; } = new();
+
+    internal NativeRolloutSettings ToNative() => new()
+    {
+        NTrials = Trials,
+        Cubeful = Cubeful ? 1 : 0,
+        VarianceReduction = VarianceReduction ? 1 : 0,
+        ChequerPlies = ChequerPlies,
+        CubePlies = CubePlies,
+        Seed = Seed,
+        Truncate = Truncate ? 1 : 0,
+        TruncatePlies = TruncatePlies,
+    };
+}
+
+/// <summary>Full rollout result with mean values and standard deviations for all seven outputs.</summary>
+/// <param name="WinProbability">Probability of winning.</param>
+/// <param name="WinGammonProbability">Probability of winning a gammon.</param>
+/// <param name="WinBackgammonProbability">Probability of winning a backgammon.</param>
+/// <param name="LoseGammonProbability">Probability of losing a gammon.</param>
+/// <param name="LoseBackgammonProbability">Probability of losing a backgammon.</param>
+/// <param name="CubelessEquity">Cubeless equity.</param>
+/// <param name="CubefulEquity">Cubeful equity.</param>
+/// <param name="WinProbabilityStdDev">Standard deviation of win probability.</param>
+/// <param name="WinGammonProbabilityStdDev">Standard deviation of win gammon probability.</param>
+/// <param name="WinBackgammonProbabilityStdDev">Standard deviation of win backgammon probability.</param>
+/// <param name="LoseGammonProbabilityStdDev">Standard deviation of lose gammon probability.</param>
+/// <param name="LoseBackgammonProbabilityStdDev">Standard deviation of lose backgammon probability.</param>
+/// <param name="CubelessEquityStdDev">Standard deviation of cubeless equity.</param>
+/// <param name="CubefulEquityStdDev">Standard deviation of cubeful equity.</param>
+public readonly record struct GnubgRolloutResult(
+    double WinProbability,
+    double WinGammonProbability,
+    double WinBackgammonProbability,
+    double LoseGammonProbability,
+    double LoseBackgammonProbability,
+    double CubelessEquity,
+    double CubefulEquity,
+    double WinProbabilityStdDev,
+    double WinGammonProbabilityStdDev,
+    double WinBackgammonProbabilityStdDev,
+    double LoseGammonProbabilityStdDev,
+    double LoseBackgammonProbabilityStdDev,
+    double CubelessEquityStdDev,
+    double CubefulEquityStdDev
+);
 
 internal static class GnubgApiNativeHelpers
 {
