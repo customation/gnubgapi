@@ -231,6 +231,71 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
         }
     }
 
+    // ── Full evaluation tests ────────────────────────────────────────
+
+    [Fact]
+    public void EvaluatePositionFull_OpeningPosition_ReturnsAllProbabilities()
+    {
+        var ctx = GetContext();
+        var result = ctx.EvaluatePositionFull("4HPwATDgc/ABMA");
+
+        Assert.InRange(result.WinProbability, 0.30, 0.70);
+        Assert.InRange(result.WinGammonProbability, 0.0, result.WinProbability);
+        Assert.InRange(result.WinBackgammonProbability, 0.0, result.WinGammonProbability);
+        Assert.InRange(result.LoseGammonProbability, 0.0, 1.0 - result.WinProbability);
+        Assert.InRange(result.LoseBackgammonProbability, 0.0, result.LoseGammonProbability);
+        Assert.True(double.IsFinite(result.CubelessEquity));
+        Assert.True(double.IsFinite(result.CubefulEquity));
+    }
+
+    [Fact]
+    public void EvaluatePositionFull_IsDeterministic()
+    {
+        var ctx = GetContext();
+        var r1 = ctx.EvaluatePositionFull("4HPwATDgc/ABMA");
+        var r2 = ctx.EvaluatePositionFull("4HPwATDgc/ABMA");
+
+        Assert.Equal(r1.WinProbability, r2.WinProbability);
+        Assert.Equal(r1.CubelessEquity, r2.CubelessEquity);
+        Assert.Equal(r1.CubefulEquity, r2.CubefulEquity);
+    }
+
+    [Fact]
+    public void EvaluatePositionFull_EquityMatchesSimpleEval()
+    {
+        var ctx = GetContext();
+        var simple = ctx.EvaluatePosition("4HPwATDgc/ABMA");
+        var full = ctx.EvaluatePositionFull("4HPwATDgc/ABMA");
+
+        // Cubeful equity should match (both use fCubeful=1)
+        Assert.Equal(simple.CubefulEquity, full.CubefulEquity, precision: 6);
+    }
+
+    [Fact]
+    public void EvaluatePositionFull_WithMatchId_ReturnsFiniteValues()
+    {
+        var ctx = GetContext();
+        var result = ctx.EvaluatePositionFull("4HPwATDgc/ABMA", "cAkAAAAAAAAA");
+
+        Assert.True(double.IsFinite(result.WinProbability));
+        Assert.True(double.IsFinite(result.CubelessEquity));
+        Assert.True(double.IsFinite(result.CubefulEquity));
+    }
+
+    [Fact]
+    public void EvaluatePositionFull_InvalidPositionId_Throws()
+    {
+        var ctx = GetContext();
+        Assert.Throws<GnubgApiException>(() => ctx.EvaluatePositionFull("garbage"));
+    }
+
+    [Fact]
+    public void EvaluatePositionFull_NullPositionId_ThrowsArgumentException()
+    {
+        var ctx = GetContext();
+        Assert.Throws<ArgumentException>(() => ctx.EvaluatePositionFull(null!));
+    }
+
     // ── Rollout tests ────────────────────────────────────────────────
 
     [Fact]

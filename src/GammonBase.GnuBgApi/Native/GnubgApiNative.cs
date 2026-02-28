@@ -94,6 +94,13 @@ internal static partial class GnubgApiNative
         out double equity,
         out double cubefulEquity);
 
+    [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static unsafe partial GnubgApiStatus gnubgapi_evaluate_position_full(
+        IntPtr ctx,
+        string positionId,
+        string? matchId,
+        double* outOutput);
+
     [LibraryImport(LibraryName)]
     internal static partial void gnubgapi_rollout_settings_default(ref NativeRolloutSettings settings);
 

@@ -76,6 +76,33 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
         return new GnubgEvaluationResult(equity, cubeful);
     }
 
+    /// <summary>Evaluates a position and returns all 7 neural-net outputs (probabilities and equities).</summary>
+    /// <param name="positionId">GNU Backgammon position ID string.</param>
+    /// <param name="matchId">Optional match ID for match-play equity calculations.</param>
+    /// <returns>A <see cref="GnubgFullEvaluationResult"/> with all probability and equity outputs.</returns>
+    /// <exception cref="GnubgApiException">Thrown when evaluation fails.</exception>
+    public unsafe GnubgFullEvaluationResult EvaluatePositionFull(string positionId, string? matchId = null)
+    {
+        if (string.IsNullOrWhiteSpace(positionId))
+        {
+            throw new ArgumentException("positionId is required", nameof(positionId));
+        }
+
+        double* output = stackalloc double[GnubgApiNative.NumRolloutOutputs];
+
+        var status = GnubgApiNative.gnubgapi_evaluate_position_full(handle, positionId, matchId, output);
+        GnubgApiNativeHelpers.ThrowIfNotOk(status);
+
+        return new GnubgFullEvaluationResult(
+            WinProbability: output[0],
+            WinGammonProbability: output[1],
+            WinBackgammonProbability: output[2],
+            LoseGammonProbability: output[3],
+            LoseBackgammonProbability: output[4],
+            CubelessEquity: output[5],
+            CubefulEquity: output[6]);
+    }
+
     /// <summary>Runs a Monte Carlo rollout of the given position.</summary>
     /// <param name="positionId">GNU Backgammon position ID string.</param>
     /// <param name="matchId">Optional match ID for match-play rollouts.</param>
@@ -137,6 +164,23 @@ public sealed class GnubgApiException : Exception
 /// <param name="Equity">Money-game equity (positive favours the player on roll).</param>
 /// <param name="CubefulEquity">Cubeful equity accounting for cube ownership and match score.</param>
 public readonly record struct GnubgEvaluationResult(double Equity, double CubefulEquity);
+
+/// <summary>Full evaluation result with all 7 neural-net outputs.</summary>
+/// <param name="WinProbability">Probability of winning.</param>
+/// <param name="WinGammonProbability">Probability of winning a gammon.</param>
+/// <param name="WinBackgammonProbability">Probability of winning a backgammon.</param>
+/// <param name="LoseGammonProbability">Probability of losing a gammon.</param>
+/// <param name="LoseBackgammonProbability">Probability of losing a backgammon.</param>
+/// <param name="CubelessEquity">Cubeless equity.</param>
+/// <param name="CubefulEquity">Cubeful equity.</param>
+public readonly record struct GnubgFullEvaluationResult(
+    double WinProbability,
+    double WinGammonProbability,
+    double WinBackgammonProbability,
+    double LoseGammonProbability,
+    double LoseBackgammonProbability,
+    double CubelessEquity,
+    double CubefulEquity);
 
 /// <summary>Configuration for a Monte Carlo rollout.</summary>
 public sealed class RolloutSettings
