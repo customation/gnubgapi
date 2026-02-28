@@ -20,12 +20,12 @@ This plan sets up a forked `gnubg` build pipeline that emits cross-platform nati
   - Init/shutdown
   - Load weights/bearoff DB
   - Evaluate a position
-  - ~~Run a rollout~~
+  - Run a rollout :white_check_mark:
   - Optional: parse/serialize position IDs
 - Decide on ABI stability rules (C ABI, versioned symbols, `gnubgapi_get_version`).
 - Define data structures for positions, cube state, and evaluation output (prefer POD structs).
 
-> **Status:** C API defined in `api/gnubgapi.h` — covers create/destroy, init/shutdown, evaluate_position, get_version, get_last_error. Rollout deferred to future iteration.
+> **Status:** C API defined in `api/gnubgapi.h` — covers create/destroy, init/shutdown, evaluate_position, rollout_position (with configurable settings), get_version, get_last_error.
 
 ## Phase 2 — Forked gnubg Build Integration — :white_check_mark: DONE
 - In the `gnubg` fork:
@@ -37,7 +37,7 @@ This plan sets up a forked `gnubg` build pipeline that emits cross-platform nati
   - Ensure static assets (weights, bearoff DB) can be loaded via explicit paths.
 - Add build options to disable GUI and optional features not required for API.
 
-> **Status:** `configure.ac` changed to `LT_INIT` (was `disable-shared`). `api/Makefile.am` cleaned up (removed format sources, added AC defines). Stubs added in `gnubgapi.c` for linker symbols. Builds successfully on Windows (MSYS2/MinGW64) and Linux.
+> **Status:** `configure.ac` changed to `LT_INIT` (was `disable-shared`). `api/Makefile.am` links eval, rollout, multithread, drawboard, evallock, and supporting sources. Stubs in `gnubgapi.c` for linker symbols. Builds on Windows (MSYS2/MinGW64) and Linux (ubuntu).
 
 ## Phase 3 — CI Build Matrix & Artifacts — :white_check_mark: DONE
 - Add GitHub Actions workflow in `gnubg` fork:
@@ -57,24 +57,26 @@ This plan sets up a forked `gnubg` build pipeline that emits cross-platform nati
   - ~~Decide whether to bundle weights/bearoff DB or download on first use.~~
   - Ensure licensing files are included in the package.
 
-> **Status:** Native binaries committed to repo (private gnubg fork prevents cross-repo CI download). `.nupkg` verified to contain both RID-specific native binaries.
+> **Status:** Native binaries committed to repo (private gnubg fork prevents cross-repo CI download). `.nupkg` verified to contain both RID-specific native binaries. Both binaries include full rollout support.
 
 ## Phase 5 — .NET P/Invoke Layer (GammonBase) — :white_check_mark: DONE
 - Create a `GammonBase.Native` project with `DllImport`/`LibraryImport` bindings.
 - Create a `GammonBase` facade API:
-  - `Evaluator` class with `EvaluatePosition`, ~~`Rollout`~~, etc.
+  - `GnubgApiContext` class with `EvaluatePosition`, `RolloutPosition` :white_check_mark:
   - Safe handle / lifetime management.
 - Add RID-specific load logic and clear error messages if native library is missing.
 
-> **Status:** `GnubgApiNative.cs` uses source-generated `LibraryImport` with `NativeLibrary.SetDllImportResolver` for cross-platform resolution. `GnubgApiContext` extends `SafeHandleZeroOrMinusOneIsInvalid`. Already existed before this effort — no changes needed.
+> **Status:** `GnubgApiNative.cs` uses source-generated `LibraryImport` with `NativeLibrary.SetDllImportResolver` for cross-platform resolution. `GnubgApiContext` extends `SafeHandleZeroOrMinusOneIsInvalid`. All public types have XML doc comments.
 
-## Phase 6 — Integration & Validation — :construction: PARTIAL
+## Phase 6 — Integration & Validation — :white_check_mark: DONE
 - Add tests that:
-  - Load the native library on each OS.
-  - Evaluate known positions with deterministic expected outputs.
+  - Load the native library on each OS. :white_check_mark:
+  - Evaluate known positions with deterministic expected outputs. :white_check_mark:
+  - Rollout positions with configurable settings. :white_check_mark:
 - Add performance benchmarks (optional) for common evaluation paths.
+- Consumer test: reference `GammonBase.GnuBgApi` via PackageReference to verify NuGet packaging. :white_check_mark:
 
-> **Status:** No unit/integration tests added yet. Local Windows build was verified manually. Need a consumer test to confirm end-to-end.
+> **Status:** 22 xUnit v3 integration tests (12 evaluation + 10 rollout) covering equity ranges, deterministic results, match IDs, extreme positions, probability ordering, stddev convergence, and error handling. Consumer test project (`GammonBase.GnuBgApi.ConsumerTest`) verifies package restore and loading. Tests auto-skip if weight files not configured.
 
 ## Phase 7 — Packaging & Release — :white_check_mark: DONE
 - Add `gnubgapi` CI:
@@ -86,15 +88,12 @@ This plan sets up a forked `gnubg` build pipeline that emits cross-platform nati
 > **Status:** `GammonBase.GnuBgApi` v0.1.4 published to `https://nuget.pkg.github.com/customation`. CI workflow: `.github/workflows/publish-package.yml`. Documentation deferred.
 
 ## Key Decisions / Risks
-- **Scope**: "everything gnubg can do" is large. Start with evaluation ~~+ rollout~~, then expand.
-- **ABI stability**: changes in upstream gnubg could break API. Keep shim layer minimal and versioned.
-- **Licensing**: if distributing binaries, ensure GPL compliance and proper notices.
-- **Data files**: weights/bearoff DB size impacts packaging; may need download strategy.
+- **Scope**: Evaluation + rollout are the core features. Expand as needed.
+- **ABI stability**: Changes in upstream gnubg could break API. Keep shim layer minimal and versioned.
+- **Licensing**: If distributing binaries, ensure GPL compliance and proper notices.
+- **Data files**: Weights/bearoff DB size impacts packaging; may need download strategy.
 
 ## Remaining Work
-1. :x: **Consumer test** — Reference `GammonBase.GnuBgApi` from gammondb (or a test project), restore from GitHub Packages, call `EvaluatePosition`, confirm it works end-to-end.
-2. :x: **Integration tests** — Add test project with known position evaluations.
-3. :x: **macOS support** — Add `osx-x64`/`osx-arm64` to build matrix if needed.
-4. :x: **Docs folder** — Architecture notes, licensing (GPL) compliance notes.
-5. :x: **Rollout API** — Expose `gnubg_rollout` through the C shim if needed.
-6. :x: **XML doc warnings** — Add XML comments to public types (CI shows 10 warnings).
+1. :x: **macOS support** — Add `osx-x64`/`osx-arm64` to build matrix if needed.
+2. :x: **Docs folder** — Architecture notes, licensing (GPL) compliance notes.
+3. :x: **Consumer integration** — Reference `GammonBase.GnuBgApi` from gammondb evaluation service, restore from GitHub Packages, wire into the evaluation pipeline.
