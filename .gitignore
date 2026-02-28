@@ -422,3 +422,9 @@ FodyWeavers.xsd
 
 # Native binaries are committed to the repo since the gnubg fork is private.
 # Update them by running fetch-natives.ps1 or copying from a gnubg build.
+
+# Local NuGet package output (consumer test)
+local-packages/
+
+# Consumer test nuget.config may contain credentials
+src/GammonBase.GnuBgApi.ConsumerTest/nuget.config
