@@ -1,5 +1,14 @@
 <Solution>
-  <Project Path="src/GammonBase.GnuBgApi/GammonBase.GnuBgApi.csproj" />
+  <Folder Name="/.config/">
+    <File Path=".gitignore" />
+    <File Path="nuget.config" />
+  </Folder>
+  <Folder Name="/.docs/" />
+  <Folder Name="/.github/" />
+  <Folder Name="/.github/workflows/">
+    <File Path=".github/workflows/publish-package.yml" />
+  </Folder>
   <Project Path="src/GammonBase.GnuBgApi.TestHarness/GammonBase.GnuBgApi.TestHarness.csproj" />
   <Project Path="src/GammonBase.GnuBgApi.Tests/GammonBase.GnuBgApi.Tests.csproj" />
+  <Project Path="src/GammonBase.GnuBgApi/GammonBase.GnuBgApi.csproj" />
 </Solution>
