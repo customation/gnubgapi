@@ -76,6 +76,24 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
         return new GnubgEvaluationResult(equity, cubeful);
     }
 
+    /// <summary>Evaluates a position at the specified ply depth and returns equity values.</summary>
+    /// <param name="positionId">GNU Backgammon position ID string.</param>
+    /// <param name="plies">Number of plies (0=instant, 1=fast, 2=world-class).</param>
+    /// <param name="matchId">Optional match ID for match-play equity calculations.</param>
+    /// <returns>An <see cref="GnubgEvaluationResult"/> containing equity and cubeful equity.</returns>
+    /// <exception cref="GnubgApiException">Thrown when evaluation fails.</exception>
+    public GnubgEvaluationResult EvaluatePositionPlied(string positionId, uint plies, string? matchId = null)
+    {
+        if (string.IsNullOrWhiteSpace(positionId))
+        {
+            throw new ArgumentException("positionId is required", nameof(positionId));
+        }
+
+        var status = GnubgApiNative.gnubgapi_evaluate_position_plied(handle, positionId, matchId, plies, out var equity, out var cubeful);
+        GnubgApiNativeHelpers.ThrowIfNotOk(status);
+        return new GnubgEvaluationResult(equity, cubeful);
+    }
+
     /// <summary>Evaluates a position and returns all 7 neural-net outputs (probabilities and equities).</summary>
     /// <param name="positionId">GNU Backgammon position ID string.</param>
     /// <param name="matchId">Optional match ID for match-play equity calculations.</param>
@@ -91,6 +109,34 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
         double* output = stackalloc double[GnubgApiNative.NumRolloutOutputs];
 
         var status = GnubgApiNative.gnubgapi_evaluate_position_full(handle, positionId, matchId, output);
+        GnubgApiNativeHelpers.ThrowIfNotOk(status);
+
+        return new GnubgFullEvaluationResult(
+            WinProbability: output[0],
+            WinGammonProbability: output[1],
+            WinBackgammonProbability: output[2],
+            LoseGammonProbability: output[3],
+            LoseBackgammonProbability: output[4],
+            CubelessEquity: output[5],
+            CubefulEquity: output[6]);
+    }
+
+    /// <summary>Evaluates a position at the specified ply depth returning all 7 outputs.</summary>
+    /// <param name="positionId">GNU Backgammon position ID string.</param>
+    /// <param name="plies">Number of plies (0=instant, 1=fast, 2=world-class).</param>
+    /// <param name="matchId">Optional match ID for match-play equity calculations.</param>
+    /// <returns>A <see cref="GnubgFullEvaluationResult"/> with all probability and equity outputs.</returns>
+    /// <exception cref="GnubgApiException">Thrown when evaluation fails.</exception>
+    public unsafe GnubgFullEvaluationResult EvaluatePositionFullPlied(string positionId, uint plies, string? matchId = null)
+    {
+        if (string.IsNullOrWhiteSpace(positionId))
+        {
+            throw new ArgumentException("positionId is required", nameof(positionId));
+        }
+
+        double* output = stackalloc double[GnubgApiNative.NumRolloutOutputs];
+
+        var status = GnubgApiNative.gnubgapi_evaluate_position_full_plied(handle, positionId, matchId, plies, output);
         GnubgApiNativeHelpers.ThrowIfNotOk(status);
 
         return new GnubgFullEvaluationResult(
@@ -140,6 +186,116 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
             CubelessEquityStdDev: stdDev[5],
             CubefulEquityStdDev: stdDev[6]
         );
+    }
+
+    // ── Move generation ──
+
+    /// <summary>Generates all legal moves for a position and dice roll.</summary>
+    public unsafe GnubgMove[] GenerateMoves(string positionId, int die1, int die2)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(positionId);
+        var moves = stackalloc NativeMove[GnubgApiNative.MaxMoves];
+        uint count = 0;
+        var status = GnubgApiNative.gnubgapi_generate_moves(handle, positionId, die1, die2, moves, &count);
+        GnubgApiNativeHelpers.ThrowIfNotOk(status);
+
+        var result = new GnubgMove[count];
+        for (int i = 0; i < count; i++)
+            result[i] = GnubgMove.FromNative(moves[i]);
+        return result;
+    }
+
+    /// <summary>Finds the single best move using GnuBG's search.</summary>
+    public unsafe GnubgMove FindBestMove(string positionId, string? matchId, int die1, int die2, uint plies)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(positionId);
+        NativeMove move;
+        var status = GnubgApiNative.gnubgapi_find_best_move(handle, positionId, matchId, die1, die2, plies, &move);
+        GnubgApiNativeHelpers.ThrowIfNotOk(status);
+        return GnubgMove.FromNative(move);
+    }
+
+    /// <summary>Generates all legal moves with evaluations, sorted best-first.</summary>
+    public unsafe GnubgScoredMove[] GenerateMovesWithEval(string positionId, string? matchId, int die1, int die2, uint plies)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(positionId);
+        var moves = stackalloc NativeScoredMove[GnubgApiNative.MaxMoves];
+        uint count = 0;
+        var status = GnubgApiNative.gnubgapi_generate_moves_with_eval(handle, positionId, matchId, die1, die2, plies, moves, &count);
+        GnubgApiNativeHelpers.ThrowIfNotOk(status);
+
+        var result = new GnubgScoredMove[count];
+        for (int i = 0; i < count; i++)
+            result[i] = GnubgScoredMove.FromNative(moves[i]);
+        return result;
+    }
+
+    /// <summary>Applies a move and returns the resulting position ID (sides swapped).</summary>
+    public unsafe string ApplyMove(string positionId, int[] anMove)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(positionId);
+        ArgumentNullException.ThrowIfNull(anMove);
+        fixed (int* movePtr = anMove)
+        {
+            var buf = stackalloc byte[16];
+            var status = GnubgApiNative.gnubgapi_apply_move(handle, positionId, movePtr, buf);
+            GnubgApiNativeHelpers.ThrowIfNotOk(status);
+            return Marshal.PtrToStringUTF8((IntPtr)buf) ?? string.Empty;
+        }
+    }
+
+    // ── Game analysis ──
+
+    /// <summary>Analyses a complete game from structured turn data.</summary>
+    public unsafe GnubgAnalysisResult AnalyseGame(GnubgGameTurn[] turns, uint plies)
+    {
+        ArgumentNullException.ThrowIfNull(turns);
+        var nativeTurns = new NativeGameTurn[turns.Length];
+        for (int i = 0; i < turns.Length; i++)
+            nativeTurns[i] = turns[i].ToNative();
+
+        NativeAnalysisResult result;
+        fixed (NativeGameTurn* ptr = nativeTurns)
+        {
+            var status = GnubgApiNative.gnubgapi_analyse_game(handle, ptr, (uint)turns.Length, plies, &result);
+            GnubgApiNativeHelpers.ThrowIfNotOk(status);
+        }
+        return GnubgAnalysisResult.FromNative(result);
+    }
+
+    /// <summary>Analyses a game from a Jellyfish .mat file.</summary>
+    public unsafe GnubgAnalysisResult AnalyseMat(string matPath, uint plies)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(matPath);
+        NativeAnalysisResult result;
+        var status = GnubgApiNative.gnubgapi_analyse_mat(handle, matPath, plies, &result);
+        GnubgApiNativeHelpers.ThrowIfNotOk(status);
+        return GnubgAnalysisResult.FromNative(result);
+    }
+
+    // ── Feature encoding ──
+
+    /// <summary>Computes 248 neural-net input features from a position.</summary>
+    public unsafe float[] PositionToFeatures(string positionId, bool isTopOnRoll)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(positionId);
+        var features = new float[GnubgApiNative.FeatureDim];
+        fixed (float* ptr = features)
+        {
+            var status = GnubgApiNative.gnubgapi_position_to_features(handle, positionId, isTopOnRoll ? 1 : 0, ptr);
+            GnubgApiNativeHelpers.ThrowIfNotOk(status);
+        }
+        return features;
+    }
+
+    // ── Version ──
+
+    /// <summary>Gets the native API version.</summary>
+    public static unsafe (uint Major, uint Minor, uint Patch) GetVersion()
+    {
+        uint major, minor, patch;
+        GnubgApiNative.gnubgapi_get_version(&major, &minor, &patch);
+        return (major, minor, patch);
     }
 
     /// <inheritdoc />
@@ -278,5 +434,144 @@ internal static class GnubgApiNativeHelpers
         }
 
         return Marshal.PtrToStringUTF8(ptr) ?? "Unknown gnubgapi error";
+    }
+}
+
+// ── Move types ──
+
+/// <summary>A legal backgammon move with up to 4 sub-moves.</summary>
+public sealed class GnubgMove
+{
+    /// <summary>From-to pairs (0-indexed points, bar=24), -1 terminated.</summary>
+    public int[] AnMove { get; init; } = [];
+    /// <summary>Position ID after the move with sides swapped (next player on roll).</summary>
+    public string ResultPositionId { get; init; } = string.Empty;
+    /// <summary>Number of sub-moves (1-4).</summary>
+    public uint SubMoveCount { get; init; }
+    /// <summary>Total pips moved.</summary>
+    public uint Pips { get; init; }
+
+    /// <summary>Formats the move in GNU Backgammon notation (e.g. "13/8 6/1").</summary>
+    public string ToNotation()
+    {
+        var parts = new List<string>();
+        for (int i = 0; i < AnMove.Length - 1; i += 2)
+        {
+            int from = AnMove[i], to = AnMove[i + 1];
+            if (from < 0) break;
+            string f = from == 24 ? "bar" : (from + 1).ToString();
+            string t = to < 0 ? "off" : (to + 1).ToString();
+            parts.Add($"{f}/{t}");
+        }
+        return string.Join(" ", parts);
+    }
+
+    internal static unsafe GnubgMove FromNative(NativeMove n)
+    {
+        var move = new int[8];
+        for (int i = 0; i < 8; i++) move[i] = n.AnMove[i];
+        return new GnubgMove
+        {
+            AnMove = move,
+            ResultPositionId = Marshal.PtrToStringUTF8((IntPtr)n.ResultPositionId) ?? string.Empty,
+            SubMoveCount = n.NSubmoves,
+            Pips = n.Pips
+        };
+    }
+}
+
+/// <summary>A move with its GnuBG evaluation, sorted best-first.</summary>
+public sealed class GnubgScoredMove
+{
+    /// <summary>The move.</summary>
+    public GnubgMove Move { get; init; } = new();
+    /// <summary>Cubeful equity from on-roll perspective.</summary>
+    public double Equity { get; init; }
+    /// <summary>Win probability.</summary>
+    public double WinProbability { get; init; }
+    /// <summary>Win gammon probability.</summary>
+    public double WinGammonProbability { get; init; }
+    /// <summary>Win backgammon probability.</summary>
+    public double WinBackgammonProbability { get; init; }
+    /// <summary>Lose gammon probability.</summary>
+    public double LoseGammonProbability { get; init; }
+    /// <summary>Lose backgammon probability.</summary>
+    public double LoseBackgammonProbability { get; init; }
+
+    internal static unsafe GnubgScoredMove FromNative(NativeScoredMove n) => new()
+    {
+        Move = GnubgMove.FromNative(n.Move),
+        Equity = n.Equity,
+        WinProbability = n.Probs[0],
+        WinGammonProbability = n.Probs[1],
+        WinBackgammonProbability = n.Probs[2],
+        LoseGammonProbability = n.Probs[3],
+        LoseBackgammonProbability = n.Probs[4]
+    };
+}
+
+/// <summary>Input for game analysis — one turn of a recorded game.</summary>
+public sealed class GnubgGameTurn
+{
+    /// <summary>Which player was on roll (0 or 1).</summary>
+    public int Player { get; init; }
+    /// <summary>First die value (1-6).</summary>
+    public int Die1 { get; init; }
+    /// <summary>Second die value (1-6).</summary>
+    public int Die2 { get; init; }
+    /// <summary>Move as from-to pairs (0-indexed, bar=24), -1 terminated.</summary>
+    public int[] AnMove { get; init; } = [-1, -1, -1, -1, -1, -1, -1, -1];
+
+    internal unsafe NativeGameTurn ToNative()
+    {
+        var n = new NativeGameTurn { Player = Player, Die1 = Die1, Die2 = Die2 };
+        for (int i = 0; i < 8; i++)
+            n.AnMove[i] = i < AnMove.Length ? AnMove[i] : -1;
+        return n;
+    }
+}
+
+/// <summary>Result of analysing a complete game — chequerplay error statistics.</summary>
+public sealed class GnubgAnalysisResult
+{
+    /// <summary>Total moves per player [0] and [1].</summary>
+    public int[] TotalMoves { get; init; } = [0, 0];
+    /// <summary>Moves with more than one legal option per player.</summary>
+    public int[] UnforcedMoves { get; init; } = [0, 0];
+    /// <summary>Skill counts per player: [player][skill] where skill 0=VeryBad, 1=Bad, 2=Doubtful, 3=None.</summary>
+    public int[,] SkillCounts { get; init; } = new int[2, 4];
+    /// <summary>Accumulated equity loss per player.</summary>
+    public float[] TotalError { get; init; } = [0, 0];
+    /// <summary>Average equity loss per unforced move.</summary>
+    public float[] ErrorPerMove { get; init; } = [0, 0];
+    /// <summary>Millipoints per move (error × 1000).</summary>
+    public float[] Mpr { get; init; } = [0, 0];
+    /// <summary>Rating string per player (e.g. "Beginner", "World Class").</summary>
+    public string[] Rating { get; init; } = ["", ""];
+    /// <summary>Number of games analysed.</summary>
+    public int GameCount { get; init; }
+
+    internal static unsafe GnubgAnalysisResult FromNative(NativeAnalysisResult n)
+    {
+        var skills = new int[2, 4];
+        for (int p = 0; p < 2; p++)
+            for (int s = 0; s < 4; s++)
+                skills[p, s] = n.SkillCounts[p * 4 + s];
+
+        return new GnubgAnalysisResult
+        {
+            TotalMoves = [n.TotalMoves[0], n.TotalMoves[1]],
+            UnforcedMoves = [n.UnforcedMoves[0], n.UnforcedMoves[1]],
+            SkillCounts = skills,
+            TotalError = [n.TotalError[0], n.TotalError[1]],
+            ErrorPerMove = [n.ErrorPerMove[0], n.ErrorPerMove[1]],
+            Mpr = [n.Mpr[0], n.Mpr[1]],
+            Rating =
+            [
+                Marshal.PtrToStringUTF8((IntPtr)n.Rating, 32)?.TrimEnd('\0') ?? "",
+                Marshal.PtrToStringUTF8((IntPtr)(n.Rating + 32), 32)?.TrimEnd('\0') ?? ""
+            ],
+            GameCount = n.NGames
+        };
     }
 }
