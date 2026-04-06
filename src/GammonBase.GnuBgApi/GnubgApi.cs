@@ -203,15 +203,23 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
     public unsafe GnubgMove[] GenerateMoves(string positionId, int die1, int die2)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(positionId);
-        var moves = stackalloc NativeMove[GnubgApiNative.MaxMoves];
-        uint count = 0;
-        var status = GnubgApiNative.gnubgapi_generate_moves(handle, positionId, die1, die2, moves, &count);
-        GnubgApiNativeHelpers.ThrowIfNotOk(status);
+        // NativeMove is 56 bytes × 3060 = ~167KB — too large for stackalloc.
+        var moves = (NativeMove*)NativeMemory.AllocZeroed((nuint)GnubgApiNative.MaxMoves, (nuint)sizeof(NativeMove));
+        try
+        {
+            uint count = 0;
+            var status = GnubgApiNative.gnubgapi_generate_moves(handle, positionId, die1, die2, moves, &count);
+            GnubgApiNativeHelpers.ThrowIfNotOk(status);
 
-        var result = new GnubgMove[count];
-        for (int i = 0; i < count; i++)
-            result[i] = GnubgMove.FromNative(moves[i]);
-        return result;
+            var result = new GnubgMove[count];
+            for (int i = 0; i < count; i++)
+                result[i] = GnubgMove.FromNative(moves[i]);
+            return result;
+        }
+        finally
+        {
+            NativeMemory.Free(moves);
+        }
     }
 
     /// <summary>Finds the single best move using GnuBG's search.</summary>
@@ -228,15 +236,23 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
     public unsafe GnubgScoredMove[] GenerateMovesWithEval(string positionId, string? matchId, int die1, int die2, uint plies)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(positionId);
-        var moves = stackalloc NativeScoredMove[GnubgApiNative.MaxMoves];
-        uint count = 0;
-        var status = GnubgApiNative.gnubgapi_generate_moves_with_eval(handle, positionId, matchId, die1, die2, plies, moves, &count);
-        GnubgApiNativeHelpers.ThrowIfNotOk(status);
+        // NativeScoredMove is ~104 bytes × 3060 = ~310KB — too large for stackalloc.
+        var moves = (NativeScoredMove*)NativeMemory.AllocZeroed((nuint)GnubgApiNative.MaxMoves, (nuint)sizeof(NativeScoredMove));
+        try
+        {
+            uint count = 0;
+            var status = GnubgApiNative.gnubgapi_generate_moves_with_eval(handle, positionId, matchId, die1, die2, plies, moves, &count);
+            GnubgApiNativeHelpers.ThrowIfNotOk(status);
 
-        var result = new GnubgScoredMove[count];
-        for (int i = 0; i < count; i++)
-            result[i] = GnubgScoredMove.FromNative(moves[i]);
-        return result;
+            var result = new GnubgScoredMove[count];
+            for (int i = 0; i < count; i++)
+                result[i] = GnubgScoredMove.FromNative(moves[i]);
+            return result;
+        }
+        finally
+        {
+            NativeMemory.Free(moves);
+        }
     }
 
     /// <summary>Applies a move and returns the resulting position ID (sides swapped).</summary>
