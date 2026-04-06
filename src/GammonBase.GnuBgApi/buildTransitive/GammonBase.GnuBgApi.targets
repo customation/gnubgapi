@@ -4,5 +4,9 @@
           CopyToOutputDirectory="PreserveNewest"
           LinkBase="gnubg-data"
           Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)..\content\gnubg-data\met\*"
+          CopyToOutputDirectory="PreserveNewest"
+          LinkBase="gnubg-data\met"
+          Visible="false" />
   </ItemGroup>
 </Project>

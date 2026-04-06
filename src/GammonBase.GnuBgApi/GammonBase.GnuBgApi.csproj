@@ -21,6 +21,7 @@
     <None Include="..\..\runtimes\**\*" Pack="true" PackagePath="runtimes\" />
     <!-- Data files packed under content/ for the .targets to reference -->
     <None Include="..\..\data\*" Pack="true" PackagePath="content\gnubg-data\" />
+    <None Include="..\..\data\met\*" Pack="true" PackagePath="content\gnubg-data\met\" />
     <!-- MSBuild targets that copy data files to consumer output -->
     <None Include="build\**" Pack="true" PackagePath="build\" />
     <None Include="buildTransitive\**" Pack="true" PackagePath="buildTransitive\" />
@@ -39,6 +40,10 @@
     <Content Include="..\..\data\*"
              CopyToOutputDirectory="PreserveNewest"
              LinkBase="gnubg-data"
+             Visible="false" />
+    <Content Include="..\..\data\met\*"
+             CopyToOutputDirectory="PreserveNewest"
+             LinkBase="gnubg-data\met"
              Visible="false" />
   </ItemGroup>
 </Project>
