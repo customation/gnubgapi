@@ -19,8 +19,11 @@
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\..\runtimes\**\*" Pack="true" PackagePath="runtimes\" />
+    <!-- Data files packed under content/ for the .targets to reference -->
     <None Include="..\..\data\*" Pack="true" PackagePath="content\gnubg-data\" />
-    <Content Include="..\..\data\*" Pack="true" PackagePath="contentFiles\any\any\gnubg-data\" />
+    <!-- MSBuild targets that copy data files to consumer output -->
+    <None Include="build\**" Pack="true" PackagePath="build\" />
+    <None Include="buildTransitive\**" Pack="true" PackagePath="buildTransitive\" />
   </ItemGroup>
 
   <!-- Copy native binaries (+ runtime deps) to output for project-reference and local dev -->
