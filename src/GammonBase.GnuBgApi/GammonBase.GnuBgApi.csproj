@@ -19,6 +19,8 @@
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\..\runtimes\**\*" Pack="true" PackagePath="runtimes\" />
+    <None Include="..\..\data\*" Pack="true" PackagePath="content\gnubg-data\" />
+    <Content Include="..\..\data\*" Pack="true" PackagePath="contentFiles\any\any\gnubg-data\" />
   </ItemGroup>
 
   <!-- Copy native binaries (+ runtime deps) to output for project-reference and local dev -->
@@ -31,5 +33,9 @@
           CopyToOutputDirectory="PreserveNewest"
           LinkBase=""
           Visible="false" />
+    <Content Include="..\..\data\*"
+             CopyToOutputDirectory="PreserveNewest"
+             LinkBase="gnubg-data"
+             Visible="false" />
   </ItemGroup>
 </Project>
