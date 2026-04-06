@@ -51,11 +51,20 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
     }
 
     /// <summary>Shuts down the evaluation engine and releases native resources held by the context.</summary>
+    /// <remarks>
+    /// Must be called explicitly before Dispose. After shutdown the handle is
+    /// marked invalid so the SafeHandle finalizer will not attempt
+    /// gnubgapi_destroy again (gnubg's MT_Close asserts on the main thread
+    /// and calls abort() when run from the .NET finalizer thread).
+    /// The small native context struct is intentionally leaked — it is a few
+    /// bytes and the process is typically exiting anyway.
+    /// </remarks>
     public void Shutdown()
     {
         if (!IsInvalid)
         {
             GnubgApiNative.gnubgapi_shutdown(handle);
+            SetHandleAsInvalid();
         }
     }
 
@@ -299,9 +308,16 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Intentionally does NOT call gnubgapi_destroy. gnubg's thread cleanup
+    /// (MT_Close → FreeMutex) asserts it is on the main thread; the .NET
+    /// finalizer runs on a different thread, causing abort(). Callers must
+    /// call <see cref="Shutdown"/> explicitly to cleanly release engine
+    /// resources. The tiny native struct leak is acceptable at process exit.
+    /// </remarks>
     protected override bool ReleaseHandle()
     {
-        GnubgApiNative.gnubgapi_destroy(handle);
+        // No-op: see remarks. Shutdown() handles the real cleanup.
         return true;
     }
 }
