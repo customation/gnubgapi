@@ -18,6 +18,14 @@ namespace GammonBase.Gnubg;
 /// </remarks>
 public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
 {
+    /// <summary>
+    /// gnubg's canonical money-game match-id encoding: cube=1, centred,
+    /// no Jacoby, no beavers, nMatchTo=0, no scores, no dice, not Crawford.
+    /// Use this when evaluating a money position with default rules; for
+    /// non-default money rules build a match-id explicitly.
+    /// </summary>
+    public const string DefaultMoneyMatchId = "cAkAAAAAAAAA";
+
     private readonly BlockingCollection<Action> _workQueue = new();
     private readonly Thread _workerThread;
 
@@ -131,12 +139,13 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
 
     /// <summary>Evaluates a backgammon position and returns equity values.</summary>
     /// <param name="positionId">GNU Backgammon position ID string.</param>
-    /// <param name="matchId">Optional match ID for match-play equity calculations.</param>
+    /// <param name="matchId">Match ID encoding cube/score/dice context. Money games are encoded with nMatchTo=0; never null.</param>
     /// <returns>An <see cref="GnubgEvaluationResult"/> containing equity and cubeful equity.</returns>
     /// <exception cref="GnubgApiException">Thrown when evaluation fails.</exception>
-    public GnubgEvaluationResult EvaluatePosition(string positionId, string? matchId = null)
+    public GnubgEvaluationResult EvaluatePosition(string positionId, string matchId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(positionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(matchId);
         return RunOnWorker(() =>
         {
             var status = GnubgApiNative.gnubgapi_evaluate_position(handle, positionId, matchId, out var equity, out var cubeful);
@@ -148,12 +157,13 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
     /// <summary>Evaluates a position at the specified ply depth and returns equity values.</summary>
     /// <param name="positionId">GNU Backgammon position ID string.</param>
     /// <param name="plies">Number of plies (0=instant, 1=fast, 2=world-class).</param>
-    /// <param name="matchId">Optional match ID for match-play equity calculations.</param>
+    /// <param name="matchId">Match ID encoding cube/score/dice context. Money games are encoded with nMatchTo=0; never null.</param>
     /// <returns>An <see cref="GnubgEvaluationResult"/> containing equity and cubeful equity.</returns>
     /// <exception cref="GnubgApiException">Thrown when evaluation fails.</exception>
-    public GnubgEvaluationResult EvaluatePositionPlied(string positionId, uint plies, string? matchId = null)
+    public GnubgEvaluationResult EvaluatePositionPlied(string positionId, uint plies, string matchId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(positionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(matchId);
         return RunOnWorker(() =>
         {
             var status = GnubgApiNative.gnubgapi_evaluate_position_plied(handle, positionId, matchId, plies, out var equity, out var cubeful);
@@ -164,12 +174,13 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
 
     /// <summary>Evaluates a position and returns all 7 neural-net outputs (probabilities and equities).</summary>
     /// <param name="positionId">GNU Backgammon position ID string.</param>
-    /// <param name="matchId">Optional match ID for match-play equity calculations.</param>
+    /// <param name="matchId">Match ID encoding cube/score/dice context. Money games are encoded with nMatchTo=0; never null.</param>
     /// <returns>A <see cref="GnubgFullEvaluationResult"/> with all probability and equity outputs.</returns>
     /// <exception cref="GnubgApiException">Thrown when evaluation fails.</exception>
-    public GnubgFullEvaluationResult EvaluatePositionFull(string positionId, string? matchId = null)
+    public GnubgFullEvaluationResult EvaluatePositionFull(string positionId, string matchId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(positionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(matchId);
         return RunOnWorker(() =>
         {
             unsafe
@@ -189,12 +200,13 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
     /// <summary>Evaluates a position at the specified ply depth returning all 7 outputs.</summary>
     /// <param name="positionId">GNU Backgammon position ID string.</param>
     /// <param name="plies">Number of plies (0=instant, 1=fast, 2=world-class).</param>
-    /// <param name="matchId">Optional match ID for match-play equity calculations.</param>
+    /// <param name="matchId">Match ID encoding cube/score/dice context. Money games are encoded with nMatchTo=0; never null.</param>
     /// <returns>A <see cref="GnubgFullEvaluationResult"/> with all probability and equity outputs.</returns>
     /// <exception cref="GnubgApiException">Thrown when evaluation fails.</exception>
-    public GnubgFullEvaluationResult EvaluatePositionFullPlied(string positionId, uint plies, string? matchId = null)
+    public GnubgFullEvaluationResult EvaluatePositionFullPlied(string positionId, uint plies, string matchId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(positionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(matchId);
         return RunOnWorker(() =>
         {
             unsafe
@@ -213,13 +225,14 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
 
     /// <summary>Runs a Monte Carlo rollout of the given position.</summary>
     /// <param name="positionId">GNU Backgammon position ID string.</param>
-    /// <param name="matchId">Optional match ID for match-play rollouts.</param>
+    /// <param name="matchId">Match ID encoding cube/score/dice context. Money games are encoded with nMatchTo=0; never null.</param>
     /// <param name="settings">Rollout configuration. Pass <c>null</c> to use defaults (1 296 trials, cubeful, 0-ply chequer, 2-ply cube).</param>
     /// <returns>A <see cref="GnubgRolloutResult"/> with mean outputs and standard deviations.</returns>
     /// <exception cref="GnubgApiException">Thrown when the rollout fails.</exception>
-    public GnubgRolloutResult RolloutPosition(string positionId, string? matchId = null, RolloutSettings? settings = null)
+    public GnubgRolloutResult RolloutPosition(string positionId, string matchId, RolloutSettings? settings = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(positionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(matchId);
         var native = (settings ?? RolloutSettings.Default).ToNative();
         return RunOnWorker(() =>
         {
@@ -265,9 +278,10 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
     }
 
     /// <summary>Finds the single best move using GnuBG's search.</summary>
-    public GnubgMove FindBestMove(string positionId, string? matchId, int die1, int die2, uint plies)
+    public GnubgMove FindBestMove(string positionId, string matchId, int die1, int die2, uint plies)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(positionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(matchId);
         return RunOnWorker(() =>
         {
             unsafe
@@ -281,9 +295,10 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
     }
 
     /// <summary>Generates all legal moves with evaluations, sorted best-first.</summary>
-    public GnubgScoredMove[] GenerateMovesWithEval(string positionId, string? matchId, int die1, int die2, uint plies)
+    public GnubgScoredMove[] GenerateMovesWithEval(string positionId, string matchId, int die1, int die2, uint plies)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(positionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(matchId);
         return RunOnWorker(() =>
         {
             unsafe

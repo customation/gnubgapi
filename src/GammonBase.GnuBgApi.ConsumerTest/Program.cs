@@ -48,10 +48,10 @@ try
     ctx.Init(weightsPath, weightsBinPath, noBearoff: true);
     Console.WriteLine("  Init succeeded (no-bearoff mode)");
 
-    // 3. Evaluate opening position
+    // 3. Evaluate opening position (money game, default rules)
     Console.WriteLine();
     Console.WriteLine("[2] Evaluate opening position (4HPwATDgc/ABMA)");
-    var opening = ctx.EvaluatePosition("4HPwATDgc/ABMA");
+    var opening = ctx.EvaluatePosition("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId);
     Console.WriteLine($"  Equity         = {opening.Equity:F6}");
     Console.WriteLine($"  CubefulEquity  = {opening.CubefulEquity:F6}");
     Assert(opening.Equity is > -0.10 and < 0.20,
@@ -59,31 +59,34 @@ try
     Assert(double.IsFinite(opening.CubefulEquity),
         "CubefulEquity is finite");
 
-    // 4. Evaluate with match ID
+    // 4. Same call with the explicit money match-id constant (sanity round-trip)
     Console.WriteLine();
-    Console.WriteLine("[3] Evaluate with match ID (5-point match)");
+    Console.WriteLine("[3] Round-trip with explicit money match-id");
     var match = ctx.EvaluatePosition("4HPwATDgc/ABMA", "cAkAAAAAAAAA");
     Console.WriteLine($"  Equity         = {match.Equity:F6}");
     Console.WriteLine($"  CubefulEquity  = {match.CubefulEquity:F6}");
     Assert(Math.Abs(opening.Equity - match.Equity) < 0.001,
-        "Cubeless equity matches money game",
+        "DefaultMoneyMatchId == 'cAkAAAAAAAAA'",
         $"diff = {Math.Abs(opening.Equity - match.Equity):F8}");
 
     // 5. Determinism
     Console.WriteLine();
     Console.WriteLine("[4] Determinism check");
-    var repeat = ctx.EvaluatePosition("4HPwATDgc/ABMA");
+    var repeat = ctx.EvaluatePosition("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId);
     Assert(opening.Equity == repeat.Equity, "Equity is deterministic");
     Assert(opening.CubefulEquity == repeat.CubefulEquity, "CubefulEquity is deterministic");
 
     // 6. Error handling
     Console.WriteLine();
     Console.WriteLine("[5] Error handling");
-    try { ctx.EvaluatePosition(""); Assert(false, "Empty position throws"); }
+    try { ctx.EvaluatePosition("", GnubgApiContext.DefaultMoneyMatchId); Assert(false, "Empty position throws"); }
     catch (ArgumentException) { Assert(true, "Empty position throws ArgumentException"); }
 
-    try { ctx.EvaluatePosition("garbage"); Assert(false, "Invalid position throws"); }
+    try { ctx.EvaluatePosition("garbage", GnubgApiContext.DefaultMoneyMatchId); Assert(false, "Invalid position throws"); }
     catch (GnubgApiException) { Assert(true, "Invalid position throws GnubgApiException"); }
+
+    try { ctx.EvaluatePosition("4HPwATDgc/ABMA", ""); Assert(false, "Empty matchId throws"); }
+    catch (ArgumentException) { Assert(true, "Empty matchId throws ArgumentException"); }
 
     // 7. Shutdown
     Console.WriteLine();

@@ -90,7 +90,7 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
         var ctx = GetContext();
 
         // Standard backgammon opening: all 15 checkers in starting position
-        var result = ctx.EvaluatePosition("4HPwATDgc/ABMA");
+        var result = ctx.EvaluatePosition("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId);
 
         // The opening is roughly equal but slightly positive for the player on roll
         Assert.InRange(result.Equity, -0.10, 0.20);
@@ -102,8 +102,8 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
     {
         var ctx = GetContext();
 
-        var result1 = ctx.EvaluatePosition("4HPwATDgc/ABMA");
-        var result2 = ctx.EvaluatePosition("4HPwATDgc/ABMA");
+        var result1 = ctx.EvaluatePosition("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId);
+        var result2 = ctx.EvaluatePosition("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId);
 
         Assert.Equal(result1.Equity, result2.Equity, precision: 10);
         Assert.Equal(result1.CubefulEquity, result2.CubefulEquity, precision: 10);
@@ -112,18 +112,18 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
     // ── Known positions with match IDs ──────────────────────────────
 
     [Fact]
-    public void EvaluatePosition_WithMatchId_CubelessEquityMatchesMoneyGame()
+    public void DefaultMoneyMatchId_AgreesWithLiteralEncoding()
     {
         var ctx = GetContext();
 
-        // Money game (no match ID)
-        var money = ctx.EvaluatePosition("4HPwATDgc/ABMA");
+        // Sanity: DefaultMoneyMatchId should be the same string as the
+        // canonical "cAkAAAAAAAAA" — and produce identical eval output.
+        var viaConst = ctx.EvaluatePosition("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId);
+        var viaLiteral = ctx.EvaluatePosition("4HPwATDgc/ABMA", "cAkAAAAAAAAA");
 
-        // 5-point match, score 0-0 (match ID: cAkAAAAAAAAA)
-        var match = ctx.EvaluatePosition("4HPwATDgc/ABMA", "cAkAAAAAAAAA");
-
-        // Cubeless equity should be very close or identical regardless of match context
-        Assert.Equal(money.Equity, match.Equity, precision: 6);
+        Assert.Equal("cAkAAAAAAAAA", GnubgApiContext.DefaultMoneyMatchId);
+        Assert.Equal(viaConst.Equity, viaLiteral.Equity, precision: 10);
+        Assert.Equal(viaConst.CubefulEquity, viaLiteral.CubefulEquity, precision: 10);
     }
 
     // ── Extreme positions ───────────────────────────────────────────
@@ -135,7 +135,7 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
 
         // Player has all 15 checkers on their 1-point (about to bear off)
         // Opponent has all 15 on their 24-point (far from home)
-        var result = ctx.EvaluatePosition("AAAA/xgAAAAAAMA");
+        var result = ctx.EvaluatePosition("AAAA/xgAAAAAAMA", GnubgApiContext.DefaultMoneyMatchId);
 
         Assert.True(result.Equity > 0.5,
             $"Expected large positive equity for strong bearoff position, got {result.Equity}");
@@ -147,28 +147,49 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
     public void EvaluatePosition_NullPositionId_ThrowsArgumentException()
     {
         var ctx = GetContext();
-        Assert.Throws<ArgumentException>(() => ctx.EvaluatePosition(null!));
+        Assert.Throws<ArgumentException>(() => ctx.EvaluatePosition(null!, GnubgApiContext.DefaultMoneyMatchId));
     }
 
     [Fact]
     public void EvaluatePosition_EmptyPositionId_ThrowsArgumentException()
     {
         var ctx = GetContext();
-        Assert.Throws<ArgumentException>(() => ctx.EvaluatePosition(""));
+        Assert.Throws<ArgumentException>(() => ctx.EvaluatePosition("", GnubgApiContext.DefaultMoneyMatchId));
     }
 
     [Fact]
     public void EvaluatePosition_WhitespacePositionId_ThrowsArgumentException()
     {
         var ctx = GetContext();
-        Assert.Throws<ArgumentException>(() => ctx.EvaluatePosition("   "));
+        Assert.Throws<ArgumentException>(() => ctx.EvaluatePosition("   ", GnubgApiContext.DefaultMoneyMatchId));
     }
 
     [Fact]
     public void EvaluatePosition_InvalidPositionId_ThrowsGnubgApiException()
     {
         var ctx = GetContext();
-        Assert.Throws<GnubgApiException>(() => ctx.EvaluatePosition("not-a-valid-position-id"));
+        Assert.Throws<GnubgApiException>(() => ctx.EvaluatePosition("not-a-valid-position-id", GnubgApiContext.DefaultMoneyMatchId));
+    }
+
+    [Fact]
+    public void EvaluatePosition_NullMatchId_ThrowsArgumentException()
+    {
+        var ctx = GetContext();
+        Assert.Throws<ArgumentException>(() => ctx.EvaluatePosition("4HPwATDgc/ABMA", null!));
+    }
+
+    [Fact]
+    public void EvaluatePosition_EmptyMatchId_ThrowsArgumentException()
+    {
+        var ctx = GetContext();
+        Assert.Throws<ArgumentException>(() => ctx.EvaluatePosition("4HPwATDgc/ABMA", ""));
+    }
+
+    [Fact]
+    public void EvaluatePosition_WhitespaceMatchId_ThrowsArgumentException()
+    {
+        var ctx = GetContext();
+        Assert.Throws<ArgumentException>(() => ctx.EvaluatePosition("4HPwATDgc/ABMA", "   "));
     }
 
     // ── Context lifecycle ───────────────────────────────────────────
@@ -220,7 +241,7 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
 
         foreach (var posId in positionIds)
         {
-            var result = ctx.EvaluatePosition(posId);
+            var result = ctx.EvaluatePosition(posId, GnubgApiContext.DefaultMoneyMatchId);
 
             Assert.True(double.IsFinite(result.Equity),
                 $"Position {posId}: Equity is not finite ({result.Equity})");
@@ -237,7 +258,7 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
     public void EvaluatePositionFull_OpeningPosition_ReturnsAllProbabilities()
     {
         var ctx = GetContext();
-        var result = ctx.EvaluatePositionFull("4HPwATDgc/ABMA");
+        var result = ctx.EvaluatePositionFull("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId);
 
         Assert.InRange(result.WinProbability, 0.30, 0.70);
         Assert.InRange(result.WinGammonProbability, 0.0, result.WinProbability);
@@ -252,8 +273,8 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
     public void EvaluatePositionFull_IsDeterministic()
     {
         var ctx = GetContext();
-        var r1 = ctx.EvaluatePositionFull("4HPwATDgc/ABMA");
-        var r2 = ctx.EvaluatePositionFull("4HPwATDgc/ABMA");
+        var r1 = ctx.EvaluatePositionFull("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId);
+        var r2 = ctx.EvaluatePositionFull("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId);
 
         Assert.Equal(r1.WinProbability, r2.WinProbability);
         Assert.Equal(r1.CubelessEquity, r2.CubelessEquity);
@@ -264,8 +285,8 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
     public void EvaluatePositionFull_EquityMatchesSimpleEval()
     {
         var ctx = GetContext();
-        var simple = ctx.EvaluatePosition("4HPwATDgc/ABMA");
-        var full = ctx.EvaluatePositionFull("4HPwATDgc/ABMA");
+        var simple = ctx.EvaluatePosition("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId);
+        var full = ctx.EvaluatePositionFull("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId);
 
         // Cubeful equity should match (both use fCubeful=1)
         Assert.Equal(simple.CubefulEquity, full.CubefulEquity, precision: 6);
@@ -286,14 +307,14 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
     public void EvaluatePositionFull_InvalidPositionId_Throws()
     {
         var ctx = GetContext();
-        Assert.Throws<GnubgApiException>(() => ctx.EvaluatePositionFull("garbage"));
+        Assert.Throws<GnubgApiException>(() => ctx.EvaluatePositionFull("garbage", GnubgApiContext.DefaultMoneyMatchId));
     }
 
     [Fact]
     public void EvaluatePositionFull_NullPositionId_ThrowsArgumentException()
     {
         var ctx = GetContext();
-        Assert.Throws<ArgumentException>(() => ctx.EvaluatePositionFull(null!));
+        Assert.Throws<ArgumentException>(() => ctx.EvaluatePositionFull(null!, GnubgApiContext.DefaultMoneyMatchId));
     }
 
     // ── Rollout tests ────────────────────────────────────────────────
@@ -304,7 +325,7 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
         var ctx = GetContext();
 
         var settings = new RolloutSettings { Trials = 36 }; // Small rollout for speed
-        var result = ctx.RolloutPosition("4HPwATDgc/ABMA", settings: settings);
+        var result = ctx.RolloutPosition("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId, settings);
 
         Assert.True(double.IsFinite(result.WinProbability),
             $"WinProbability is not finite: {result.WinProbability}");
@@ -320,7 +341,7 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
         var ctx = GetContext();
 
         var settings = new RolloutSettings { Trials = 36 };
-        var result = ctx.RolloutPosition("4HPwATDgc/ABMA", settings: settings);
+        var result = ctx.RolloutPosition("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId, settings);
 
         // Opening position should be close to 50/50
         Assert.InRange(result.WinProbability, 0.30, 0.70);
@@ -332,7 +353,7 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
         var ctx = GetContext();
 
         var settings = new RolloutSettings { Trials = 36 };
-        var result = ctx.RolloutPosition("4HPwATDgc/ABMA", settings: settings);
+        var result = ctx.RolloutPosition("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId, settings);
 
         // P(win) should be >= P(win gammon) >= P(win backgammon)
         Assert.True(result.WinProbability >= result.WinGammonProbability,
@@ -354,7 +375,7 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
         var ctx = GetContext();
 
         var settings = new RolloutSettings { Trials = 36 };
-        var result = ctx.RolloutPosition("4HPwATDgc/ABMA", settings: settings);
+        var result = ctx.RolloutPosition("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId, settings);
 
         Assert.True(result.WinProbabilityStdDev >= 0,
             $"WinProbabilityStdDev is negative: {result.WinProbabilityStdDev}");
@@ -386,7 +407,7 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
 
         // This test verifies that null settings uses defaults (1296 trials).
         // Just confirm it doesn't throw — the actual trial count is internal.
-        var result = ctx.RolloutPosition("4HPwATDgc/ABMA");
+        var result = ctx.RolloutPosition("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId);
 
         Assert.True(double.IsFinite(result.CubelessEquity),
             $"CubelessEquity is not finite: {result.CubelessEquity}");
@@ -400,8 +421,8 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
         var small = new RolloutSettings { Trials = 36 };
         var large = new RolloutSettings { Trials = 324 };
 
-        var resultSmall = ctx.RolloutPosition("4HPwATDgc/ABMA", settings: small);
-        var resultLarge = ctx.RolloutPosition("4HPwATDgc/ABMA", settings: large);
+        var resultSmall = ctx.RolloutPosition("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId, small);
+        var resultLarge = ctx.RolloutPosition("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId, large);
 
         // With more trials, standard deviation should generally be smaller.
         // This is a statistical property, so we use a generous margin.
@@ -414,14 +435,14 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
     public void RolloutPosition_NullPositionId_ThrowsArgumentException()
     {
         var ctx = GetContext();
-        Assert.Throws<ArgumentException>(() => ctx.RolloutPosition(null!));
+        Assert.Throws<ArgumentException>(() => ctx.RolloutPosition(null!, GnubgApiContext.DefaultMoneyMatchId));
     }
 
     [Fact]
     public void RolloutPosition_EmptyPositionId_ThrowsArgumentException()
     {
         var ctx = GetContext();
-        Assert.Throws<ArgumentException>(() => ctx.RolloutPosition(""));
+        Assert.Throws<ArgumentException>(() => ctx.RolloutPosition("", GnubgApiContext.DefaultMoneyMatchId));
     }
 
     [Fact]
@@ -429,6 +450,6 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
     {
         var ctx = GetContext();
         var settings = new RolloutSettings { Trials = 36 };
-        Assert.Throws<GnubgApiException>(() => ctx.RolloutPosition("garbage", settings: settings));
+        Assert.Throws<GnubgApiException>(() => ctx.RolloutPosition("garbage", GnubgApiContext.DefaultMoneyMatchId, settings));
     }
 }
