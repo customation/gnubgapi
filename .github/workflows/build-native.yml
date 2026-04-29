@@ -1,0 +1,100 @@
+name: Build Native Libraries
+
+on:
+  workflow_dispatch:
+  push:
+    tags: [ 'v*' ]
+    branches: [ master ]
+    paths:
+      - 'native/**'
+      - '.github/workflows/build-native.yml'
+
+concurrency:
+  group: native-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            output-name: libgnubgapi.dll
+          - os: ubuntu-latest
+            rid: linux-x64
+            output-name: libgnubgapi.so
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # --- Windows (MSYS2/MinGW64) ---
+      - name: Setup MSYS2
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-glib2
+            mingw-w64-x86_64-gmp
+            mingw-w64-x86_64-pkg-config
+            autoconf
+            automake
+            libtool
+            make
+            gettext-devel
+            bison
+            flex
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cd native
+          GNUBGAPI_TARGET=win-x64 ./build.sh "$(pwd)/_out"
+
+      # --- Linux ---
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglib2.0-dev libgmp-dev libtool automake autoconf bison flex pkg-config gettext
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd native
+          GNUBGAPI_TARGET=linux-x64 ./build.sh "$(pwd)/_out"
+
+      # --- Upload ---
+      - name: Upload native binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.rid }}
+          path: native/_out/${{ matrix.output-name }}
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/native-win-x64/libgnubgapi.dll
+            artifacts/native-linux-x64/libgnubgapi.so

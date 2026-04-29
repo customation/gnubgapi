@@ -1,0 +1,3 @@
+[submodule "native/gnubg"]
+	path = native/gnubg
+	url = https://git.savannah.gnu.org/git/gnubg.git
