@@ -8,6 +8,7 @@
 #include "gnubgapi.h"
 
 #include "eval.h"
+#include "matchequity.h"
 #include "matchid.h"
 #include "positionid.h"
 #include "lib/gnubg-types.h"
@@ -20,6 +21,7 @@ static void init_standard_board(TanBoard anBoard) {
 }
 
 #include <glib/gstdio.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -198,6 +200,22 @@ gnubgapi_status gnubgapi_init(
     MT_InitThreads();
     MT_StartThreads();
     EvalInitialise((char *)weights_path, (char *)weights_binary_path, no_bearoff, NULL);
+
+    /*
+     * Load the match equity table. gnubg's main app does this in gnubg.c
+     * via InitMatchEquity(BuildFilename2("met", "Kazaross-XG2.xml")). We
+     * MUST do the same — without it, every match-play cubeful evaluation
+     * is garbage because mwc2eq reads from an uninitialised MET, returning
+     * NaN / 1.0 / -1.0 instead of real match-equity-converted values.
+     * This was historically missing from the wrapper, which is why all
+     * match-play move evaluations came back as -1 or 0 across the board.
+     */
+    {
+        extern char *pkg_datadir;
+        char *met_path = g_build_filename(pkg_datadir, "met", "Kazaross-XG2.xml", NULL);
+        InitMatchEquity(met_path);  /* returns void; on failure it falls back to a built-in MET */
+        g_free(met_path);
+    }
 
     /* Initialise the RNG context used by rollouts (same as gnubg.c main) */
     if (!rngctxRollout) {
@@ -806,59 +824,55 @@ gnubgapi_status gnubgapi_generate_moves_with_eval(
     gnubgapi_status st = parse_position_and_cubeinfo(ctx, position_id, match_id, board, &ci);
     if (st != GNUBGAPI_OK) return st;
 
-    /* Analysis API: evaluate every legal move at the requested ply, with
-     * the cube on (unless caller supplied a money-game match id, in which
-     * case parse_position_and_cubeinfo already configured a money cubeinfo).
-     * No pruning, no filtering — this is the Review/commentary entry
-     * point, not a playing-engine hot path.
+    /* Analysis API: evaluate every legal move at the requested ply with
+     * the cube in play (money mode is just match_id with nMatchTo=0).
+     * This is the Review / commentary entry point, not a playing-engine
+     * hot path — every move must come back with a real cubeful equity,
+     * not a sea of -1s.
      *
-     * gnubg's FindnSaveBestMoves is built around iterative-deepening
-     * pruning: it leaves arEvalMove[OUTPUT_CUBEFUL_EQUITY] uninitialised on
-     * pruned moves, so reading it produced platform-dependent garbage
-     * (NaN on linux-x64, -1 on win-x64). Replacing with GenerateMoves +
-     * per-move ScoreMove gives every move a real, fully-converted equity.
+     * Implementation: gnubg's FindnSaveBestMoves runs an iterative-
+     * deepening loop and, at each ply boundary, truncates the move list
+     * to the filter's `Accept` count. The truncated moves never get a
+     * deeper-ply eval and their arEvalMove[OUTPUT_CUBEFUL_EQUITY] is
+     * left at the prune-net's placeholder value (-1.0).
+     *
+     * Fix: keep gnubg's blessed inner-recursion path (fUsePrune = TRUE,
+     * which routes EvaluatePositionCubeful4's opponent-move loop through
+     * the prune-net-tested FindBestMoveInEval — that's the path
+     * production gnubg has used for 20+ years) but pass a custom
+     * non-truncating filter so the OUTER iterative-deepening loop never
+     * drops a move. Every legal move ends up scored at the requested
+     * final ply. Earlier attempt (fUsePrune = FALSE) regressed by
+     * pushing the inner recursion onto FindBestMovePlied, an alternate
+     * path that doesn't fully populate arEvalMove for our use case.
      */
     evalcontext ec = {
         .fCubeful = TRUE,
         .nPlies = (unsigned int)n_plies,
-        .fUsePrune = FALSE,
+        .fUsePrune = TRUE,
         .fDeterministic = TRUE,
         .rNoise = 0.0f
     };
 
+    /* Non-truncating filter: at every ply boundary, accept every move
+     * that's still in the list. MAX_MOVES (3060) is the upper bound on
+     * the number of legal-move sequences for any one dice roll, so
+     * MIN(Accept, cMoves) inside FindnSaveBestMoves never truncates.
+     * Avoid INT_MAX here — gnubg arithmetic on Accept may overflow. */
+    movefilter no_truncate[MAX_FILTER_PLIES][MAX_FILTER_PLIES];
+    memset(no_truncate, 0, sizeof(no_truncate));
+    for (int i = 0; i < MAX_FILTER_PLIES; i++)
+        for (int j = 0; j < MAX_FILTER_PLIES; j++)
+            no_truncate[i][j].Accept = MAX_MOVES;
+
     movelist ml;
     memset(&ml, 0, sizeof(ml));
-    GenerateMoves(&ml, (ConstTanBoard)board, die1, die2, FALSE);
 
-    if (ml.cMoves == 0) {
-        *out_count = 0;
-        set_last_error("");
-        return GNUBGAPI_OK;
+    if (FindnSaveBestMoves(&ml, die1, die2, (ConstTanBoard)board,
+                           NULL, FALSE, 0.0f, &ci, &ec, no_truncate) < 0) {
+        set_last_error("FindnSaveBestMoves failed");
+        return GNUBGAPI_E_INTERNAL;
     }
-
-    /* GenerateMoves returns pml->amMoves pointing into a static buffer;
-     * ScoreMove can re-enter GenerateMoves at >0 plies so we must own
-     * a private copy first. */
-#if GLIB_CHECK_VERSION(2, 67, 4)
-    move *moves_copy = (move *)g_memdup2(ml.amMoves, ml.cMoves * sizeof(move));
-#else
-    move *moves_copy = (move *)g_memdup(ml.amMoves, ml.cMoves * sizeof(move));
-#endif
-    ml.amMoves = moves_copy;
-
-    for (unsigned int i = 0; i < ml.cMoves; i++) {
-        if (ScoreMove(NULL, &ml.amMoves[i], &ci, &ec, (int)n_plies) < 0) {
-            g_free(moves_copy);
-            set_last_error("ScoreMove failed");
-            return GNUBGAPI_E_INTERNAL;
-        }
-    }
-
-    /* Sort best-first by rScore (cubeful when fCubeful=TRUE, cubeless
-     * otherwise — set above). gnubg's CompareMoves is the canonical
-     * comparator. */
-    qsort(ml.amMoves, ml.cMoves, sizeof(move),
-          (int (*)(const void *, const void *))CompareMoves);
 
     *out_count = ml.cMoves;
     for (unsigned int i = 0; i < ml.cMoves; i++) {
@@ -869,7 +883,11 @@ gnubgapi_status gnubgapi_generate_moves_with_eval(
         }
     }
 
-    g_free(moves_copy);
+    /* FindnSaveBestMoves allocates amMoves with g_memdup — must free */
+    if (ml.amMoves) {
+        g_free(ml.amMoves);
+    }
+
     set_last_error("");
     return GNUBGAPI_OK;
 }
