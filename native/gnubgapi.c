@@ -183,19 +183,33 @@ gnubgapi_status gnubgapi_init(
         return GNUBGAPI_E_INVALID_ARGUMENT;
     }
     if (data_dir && data_dir[0]) {
-        if (g_chdir(data_dir) != 0) {
-            set_last_error("failed to change data directory");
-            return GNUBGAPI_E_INTERNAL;
-        }
         /*
          * Override the package data directory so EvalInitialise can find
-         * bearoff databases (gnubg_ts0.bd, gnubg_os0.bd) in data_dir.
-         * Without this, getPkgDataDir() may resolve to the python.exe
-         * directory or a stale compile-time path.
+         * bearoff databases (gnubg_ts0.bd, gnubg_os0.bd) and InitMatchEquity
+         * can find the MET (met/Kazaross-XG2.xml) in data_dir.
+         *
+         * Resolve data_dir to an absolute path FIRST, then publish it to
+         * pkg_datadir. We do NOT chdir — chdir + relative pkg_datadir was
+         * a footgun: callers passing a relative data_dir like "gnubg-data"
+         * would chdir into it, then path resolution against the same
+         * relative pkg_datadir would double-prefix and miss the file.
+         * Bearoff/MET would then silently fall through to gnubg's built-in
+         * default MET, which is what produced NaN cubeful equities for
+         * match-play evaluations even on opening positions.
          */
         extern char *pkg_datadir;
         g_free(pkg_datadir);
-        pkg_datadir = g_strdup(data_dir);
+        if (g_path_is_absolute(data_dir)) {
+            pkg_datadir = g_strdup(data_dir);
+        } else {
+            char *cwd = g_get_current_dir();
+            pkg_datadir = g_build_filename(cwd, data_dir, NULL);
+            g_free(cwd);
+        }
+        if (!g_file_test(pkg_datadir, G_FILE_TEST_IS_DIR)) {
+            set_last_error("data_dir does not exist or is not a directory");
+            return GNUBGAPI_E_INVALID_ARGUMENT;
+        }
     }
     MT_InitThreads();
     MT_StartThreads();
