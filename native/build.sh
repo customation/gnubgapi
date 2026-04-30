@@ -40,7 +40,13 @@ mkdir -p "$OUT_DIR"
 echo "==> Configuring gnubg ($(cd "$GNUBG_DIR" && git describe --always))"
 cd "$GNUBG_DIR"
 autoreconf -fi
-./configure --without-python --without-gtk --without-board3d --quiet
+# Linux requires -fPIC throughout for the resulting .a's to be linkable into
+# our shared .so. Windows DLLs don't need it (and emit a warning if asked).
+# Inject CFLAGS at configure time so gnubg's Makefiles bake it in everywhere
+# instead of trying to override per-target later.
+CFG_CFLAGS="-O3 -ffast-math"
+if [ "$TARGET" = "linux-x64" ]; then CFG_CFLAGS="$CFG_CFLAGS -fPIC"; fi
+CFLAGS="$CFG_CFLAGS" ./configure --without-python --without-gtk --without-board3d --quiet
 
 # Step 2: build gnubg's lib/libevent.la — the only internal static lib our
 # wrapper transitively depends on (queues + event loop helpers used by
