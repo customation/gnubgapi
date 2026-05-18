@@ -488,6 +488,66 @@ gnubgapi_status gnubgapi_evaluate_position_full_plied(
 }
 
 /* ------------------------------------------------------------------ */
+/* Cube decision API                                                  */
+/* ------------------------------------------------------------------ */
+
+gnubgapi_status gnubgapi_evaluate_cube_decision(
+    gnubgapi_context *ctx,
+    const char *position_id,
+    const char *match_id,
+    uint32_t n_plies,
+    gnubgapi_cube_decision_result *out
+) {
+    if (!out) {
+        set_last_error("out is null");
+        return GNUBGAPI_E_INVALID_ARGUMENT;
+    }
+
+    TanBoard board;
+    cubeinfo ci;
+
+    gnubgapi_status st = parse_position_and_cubeinfo(ctx, position_id, match_id, board, &ci);
+    if (st != GNUBGAPI_OK) return st;
+
+    evalcontext ec = {
+        .fCubeful = TRUE,
+        .nPlies = (unsigned int)n_plies,
+        .fUsePrune = (n_plies >= 2) ? TRUE : FALSE,
+        .fDeterministic = TRUE,
+        .rNoise = 0.0f
+    };
+
+    /* GeneralCubeDecisionE writes the 2x7 cubeful outputs in float.
+     * Format.c calls it with a NULL evalsetup when doing a plain
+     * cubeful eval (no rollout), so we do the same. */
+    float aarOutput[2][NUM_ROLLOUT_OUTPUTS];
+    if (GeneralCubeDecisionE(aarOutput, (ConstTanBoard) board, &ci, &ec, 0) < 0) {
+        set_last_error("cube decision evaluation failed");
+        return GNUBGAPI_E_INTERNAL;
+    }
+
+    /* FindCubeDecision fills arDouble[4] = {OPTIMAL, NODOUBLE, TAKE, DROP}
+     * from the offerer's POV, normalized to money-equity space in match
+     * play, and returns the cubedecision enum value (DOUBLE_TAKE,
+     * NODOUBLE_TAKE, TOOGOOD_PASS, etc.). */
+    float arDouble[NUM_CUBEFUL_OUTPUTS];
+    cubedecision cd = FindCubeDecision(arDouble, aarOutput, &ci);
+
+    for (int r = 0; r < 2; r++) {
+        for (int c = 0; c < NUM_ROLLOUT_OUTPUTS; c++) {
+            out->cubeful_outputs[r][c] = (double) aarOutput[r][c];
+        }
+    }
+    for (int i = 0; i < NUM_CUBEFUL_OUTPUTS; i++) {
+        out->equities[i] = (double) arDouble[i];
+    }
+    out->decision = (int32_t) cd;
+
+    set_last_error("");
+    return GNUBGAPI_OK;
+}
+
+/* ------------------------------------------------------------------ */
 /* Rollout API                                                        */
 /* ------------------------------------------------------------------ */
 

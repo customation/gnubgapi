@@ -46,6 +46,24 @@ internal unsafe struct NativeScoredMove
 }
 
 /// <summary>
+/// Mirrors the native <c>gnubgapi_cube_decision_result</c> struct layout.
+/// Must be kept in sync with <c>gnubgapi.h</c>.
+/// Layout: <c>double[2][7]</c> cubeful outputs, then <c>double[4]</c> equities,
+/// then a 32-bit decision enum (4 bytes; trailing 4 bytes of natural padding
+/// before the next 8-byte boundary do not matter — struct is passed by ref).
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct NativeCubeDecisionResult
+{
+    /// <summary>Flattened <c>[2][7]</c> cubeful outputs (row-major, 14 doubles).</summary>
+    public fixed double CubefulOutputs[14];
+    /// <summary>Doubler-view equities: <c>[0]</c> OPTIMAL, <c>[1]</c> NODOUBLE, <c>[2]</c> TAKE, <c>[3]</c> DROP.</summary>
+    public fixed double Equities[4];
+    /// <summary>gnubg's <c>cubedecision</c> enum ordinal — see <see cref="GammonBase.Gnubg.GnubgCubeDecision"/>.</summary>
+    public int Decision;
+}
+
+/// <summary>
 /// Mirrors the native <c>gnubgapi_game_turn</c> struct layout.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
@@ -174,6 +192,14 @@ internal static partial class GnubgApiNative
         string? matchId,
         uint nPlies,
         double* outOutput);
+
+    [LibraryImport(LibraryName, StringMarshalling = StringMarshalling.Utf8)]
+    internal static unsafe partial GnubgApiStatus gnubgapi_evaluate_cube_decision(
+        IntPtr ctx,
+        string positionId,
+        string? matchId,
+        uint nPlies,
+        NativeCubeDecisionResult* outResult);
 
     [LibraryImport(LibraryName)]
     internal static partial void gnubgapi_rollout_settings_default(ref NativeRolloutSettings settings);

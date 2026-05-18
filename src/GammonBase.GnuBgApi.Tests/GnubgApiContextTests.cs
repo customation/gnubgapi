@@ -452,4 +452,65 @@ public sealed class GnubgApiContextTests : IClassFixture<GnubgFixture>
         var settings = new RolloutSettings { Trials = 36 };
         Assert.Throws<GnubgApiException>(() => ctx.RolloutPosition("garbage", GnubgApiContext.DefaultMoneyMatchId, settings));
     }
+
+    // ── Cube decision ───────────────────────────────────────────────
+
+    [Fact]
+    public void EvaluateCubeDecision_OpeningPosition_ProducesSensibleEquities()
+    {
+        var ctx = GetContext();
+
+        // Standard backgammon opening with a centered 1-cube. Whatever the
+        // recommendation, the engine should produce real numbers — not the
+        // hand-rolled fakes the wrapper exists to replace.
+        var result = ctx.EvaluateCubeDecision("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId);
+
+        // Drop equity in money play is exactly +1 (offerer wins the cube).
+        Assert.Equal(1.0, result.DropEquity, precision: 6);
+        // The opening is small; no action equity should exceed the drop value.
+        Assert.True(result.NoDoubleEquity < 1.0 + 1e-9, $"NoDouble {result.NoDoubleEquity} exceeds DropEquity {result.DropEquity}");
+        Assert.True(result.TakeEquity    < 1.0 + 1e-9, $"Take     {result.TakeEquity}    exceeds DropEquity {result.DropEquity}");
+        Assert.InRange(result.OptimalEquity, -1.5, 1.5);
+        // Probabilities are well-formed (sum-of-row close to 1).
+        Assert.InRange(result.NoDouble.WinProbability, 0.0, 1.0);
+        Assert.InRange(result.DoubleTake.WinProbability, 0.0, 1.0);
+        // Decision is one of the legal enum values.
+        Assert.True(Enum.IsDefined(typeof(GnubgCubeDecision), result.Decision));
+    }
+
+    [Fact]
+    public void EvaluateCubeDecision_IsDeterministic()
+    {
+        var ctx = GetContext();
+
+        var a = ctx.EvaluateCubeDecision("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId);
+        var b = ctx.EvaluateCubeDecision("4HPwATDgc/ABMA", GnubgApiContext.DefaultMoneyMatchId);
+
+        Assert.Equal(a.NoDoubleEquity, b.NoDoubleEquity, precision: 10);
+        Assert.Equal(a.TakeEquity,     b.TakeEquity,     precision: 10);
+        Assert.Equal(a.DropEquity,     b.DropEquity,     precision: 10);
+        Assert.Equal(a.OptimalEquity,  b.OptimalEquity,  precision: 10);
+        Assert.Equal(a.Decision,       b.Decision);
+    }
+
+    [Fact]
+    public void EvaluateCubeDecision_NullPositionId_ThrowsArgumentException()
+    {
+        var ctx = GetContext();
+        Assert.Throws<ArgumentException>(() => ctx.EvaluateCubeDecision(null!, GnubgApiContext.DefaultMoneyMatchId));
+    }
+
+    [Fact]
+    public void EvaluateCubeDecision_NullMatchId_ThrowsArgumentException()
+    {
+        var ctx = GetContext();
+        Assert.Throws<ArgumentException>(() => ctx.EvaluateCubeDecision("4HPwATDgc/ABMA", null!));
+    }
+
+    [Fact]
+    public void EvaluateCubeDecision_InvalidPositionId_ThrowsGnubgApiException()
+    {
+        var ctx = GetContext();
+        Assert.Throws<GnubgApiException>(() => ctx.EvaluateCubeDecision("garbage", GnubgApiContext.DefaultMoneyMatchId));
+    }
 }

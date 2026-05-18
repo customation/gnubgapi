@@ -255,6 +255,36 @@ public sealed class GnubgApiContext : SafeHandleZeroOrMinusOneIsInvalid
         });
     }
 
+    /// <summary>Evaluates the cube decision at the given position.</summary>
+    /// <remarks>
+    /// Wraps gnubg's <c>GeneralCubeDecisionE</c> + <c>FindCubeDecision</c> pair.
+    /// Returns the full 2×7 cubeful outputs (no-double + double-take), the
+    /// four-element equity summary (OPTIMAL / NODOUBLE / TAKE / DROP), and the
+    /// engine's recommended <see cref="GnubgCubeDecision"/>. All equities are
+    /// from the offerer's (player-on-roll's) perspective, normalized to
+    /// money-equity space in match play.
+    /// </remarks>
+    /// <param name="positionId">GNU Backgammon position ID string.</param>
+    /// <param name="matchId">Match ID encoding cube/score/dice context. Money games are encoded with nMatchTo=0; never null.</param>
+    /// <param name="plies">Number of plies (0=instant, 1=fast, 2=world-class).</param>
+    /// <returns>A <see cref="GnubgCubeDecisionResult"/> with all engine outputs.</returns>
+    /// <exception cref="GnubgApiException">Thrown when evaluation fails.</exception>
+    public GnubgCubeDecisionResult EvaluateCubeDecision(string positionId, string matchId, uint plies = 0)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(positionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(matchId);
+        return RunOnWorker(() =>
+        {
+            unsafe
+            {
+                NativeCubeDecisionResult native;
+                var status = GnubgApiNative.gnubgapi_evaluate_cube_decision(handle, positionId, matchId, plies, &native);
+                GnubgApiNativeHelpers.ThrowIfNotOk(status);
+                return GnubgCubeDecisionResult.FromNative(native);
+            }
+        });
+    }
+
     // ── Move generation ──
 
     /// <summary>Generates all legal moves for a position and dice roll.</summary>
@@ -550,6 +580,109 @@ internal static class GnubgApiNativeHelpers
         }
 
         return Marshal.PtrToStringUTF8(ptr) ?? "Unknown gnubgapi error";
+    }
+}
+
+// ── Cube decision types ──
+
+/// <summary>
+/// gnubg's cube-decision recommendation enum, mirrored from <c>eval.h</c>
+/// (<c>cubedecision</c>). Integer values are stable across native versions
+/// and match the <c>GNUBGAPI_CUBE_DECISION_*</c> macros in <c>gnubgapi.h</c>.
+/// </summary>
+public enum GnubgCubeDecision
+{
+    /// <summary>Double — opponent should take.</summary>
+    DoubleTake = 0,
+    /// <summary>Double — opponent should pass (drop).</summary>
+    DoublePass = 1,
+    /// <summary>No double — if doubled, opponent would take.</summary>
+    NoDoubleTake = 2,
+    /// <summary>Too good to double — playing on for gammon is better, but if doubled opponent takes.</summary>
+    TooGoodTake = 3,
+    /// <summary>Too good to double — playing on for gammon is better, and if doubled opponent passes.</summary>
+    TooGoodPass = 4,
+    /// <summary>Double — opponent should beaver.</summary>
+    DoubleBeaver = 5,
+    /// <summary>No double — if doubled, opponent would beaver.</summary>
+    NoDoubleBeaver = 6,
+    /// <summary>Redouble — opponent should take.</summary>
+    RedoubleTake = 7,
+    /// <summary>Redouble — opponent should pass.</summary>
+    RedoublePass = 8,
+    /// <summary>No redouble — if redoubled, opponent would take.</summary>
+    NoRedoubleTake = 9,
+    /// <summary>Too good to redouble — if redoubled, opponent takes.</summary>
+    TooGoodReTake = 10,
+    /// <summary>Too good to redouble — if redoubled, opponent passes.</summary>
+    TooGoodRePass = 11,
+    /// <summary>No redouble — if redoubled, opponent would beaver.</summary>
+    NoRedoubleBeaver = 12,
+    /// <summary>No double — cube is dead (match play; doubling has no effect).</summary>
+    NoDoubleDeadCube = 13,
+    /// <summary>No redouble — cube is dead (match play; redoubling has no effect).</summary>
+    NoRedoubleDeadCube = 14,
+    /// <summary>Cube is not available to the player on roll.</summary>
+    NotAvailable = 15,
+    /// <summary>Either-or — doubling is fine; opponent takes.</summary>
+    OptionalDoubleTake = 16,
+    /// <summary>Either-or — redoubling is fine; opponent takes.</summary>
+    OptionalRedoubleTake = 17,
+    /// <summary>Either-or — doubling is fine; opponent beavers.</summary>
+    OptionalDoubleBeaver = 18,
+    /// <summary>Either-or — doubling is fine; opponent passes.</summary>
+    OptionalDoublePass = 19,
+    /// <summary>Either-or — redoubling is fine; opponent passes.</summary>
+    OptionalRedoublePass = 20,
+}
+
+/// <summary>
+/// Result of <see cref="GnubgApiContext.EvaluateCubeDecision"/> — full cube-decision data
+/// from gnubg's <c>GeneralCubeDecisionE</c> + <c>FindCubeDecision</c> pair.
+/// </summary>
+/// <param name="NoDouble">Cubeful outputs for the no-double position (post-decision P, P(G), P(BG), P(LG), P(LBG), cubeless equity, cubeful equity — all from on-roll perspective).</param>
+/// <param name="DoubleTake">Cubeful outputs for the double-take position (same layout as <paramref name="NoDouble"/>).</param>
+/// <param name="OptimalEquity">Equity of the right cube decision (from offerer's perspective).</param>
+/// <param name="NoDoubleEquity">Equity if the offerer does not double.</param>
+/// <param name="TakeEquity">Equity if doubled and taken.</param>
+/// <param name="DropEquity">Equity if doubled and dropped (typically +1 in money play; match-score-normalized in match play).</param>
+/// <param name="Decision">gnubg's recommended cube action — see <see cref="GnubgCubeDecision"/>.</param>
+public readonly record struct GnubgCubeDecisionResult(
+    GnubgFullEvaluationResult NoDouble,
+    GnubgFullEvaluationResult DoubleTake,
+    double OptimalEquity,
+    double NoDoubleEquity,
+    double TakeEquity,
+    double DropEquity,
+    GnubgCubeDecision Decision)
+{
+    internal static unsafe GnubgCubeDecisionResult FromNative(NativeCubeDecisionResult n)
+    {
+        // Row-major flattened [2][7]: index = row*7 + col.
+        var nd = new GnubgFullEvaluationResult(
+            WinProbability:            n.CubefulOutputs[0],
+            WinGammonProbability:      n.CubefulOutputs[1],
+            WinBackgammonProbability:  n.CubefulOutputs[2],
+            LoseGammonProbability:     n.CubefulOutputs[3],
+            LoseBackgammonProbability: n.CubefulOutputs[4],
+            CubelessEquity:            n.CubefulOutputs[5],
+            CubefulEquity:             n.CubefulOutputs[6]);
+        var dt = new GnubgFullEvaluationResult(
+            WinProbability:            n.CubefulOutputs[7],
+            WinGammonProbability:      n.CubefulOutputs[8],
+            WinBackgammonProbability:  n.CubefulOutputs[9],
+            LoseGammonProbability:     n.CubefulOutputs[10],
+            LoseBackgammonProbability: n.CubefulOutputs[11],
+            CubelessEquity:            n.CubefulOutputs[12],
+            CubefulEquity:             n.CubefulOutputs[13]);
+        return new GnubgCubeDecisionResult(
+            NoDouble:       nd,
+            DoubleTake:     dt,
+            OptimalEquity:  n.Equities[0],
+            NoDoubleEquity: n.Equities[1],
+            TakeEquity:     n.Equities[2],
+            DropEquity:     n.Equities[3],
+            Decision:       (GnubgCubeDecision)n.Decision);
     }
 }
 

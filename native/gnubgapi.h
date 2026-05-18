@@ -334,6 +334,98 @@ GNUBGAPI_EXPORT gnubgapi_status gnubgapi_analyse_mat(
 );
 
 /* ------------------------------------------------------------------ */
+/* Cube decision API                                                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Cube-decision result produced by gnubg's GeneralCubeDecisionE +
+ * FindCubeDecision pair. All equities are from the offerer's
+ * (player-on-roll's) perspective and, in match play, normalized to
+ * money-equity space (mwc2eq).
+ */
+typedef struct gnubgapi_cube_decision_result {
+    /*
+     * 2x7 cubeful outputs:
+     *   Row 0 = no-double position
+     *   Row 1 = double-take position (cube has been doubled and taken)
+     *
+     * Each row has the same layout as gnubgapi_evaluate_position_full:
+     *   [0] P(win)
+     *   [1] P(win gammon)
+     *   [2] P(win backgammon)
+     *   [3] P(lose gammon)
+     *   [4] P(lose backgammon)
+     *   [5] Cubeless equity
+     *   [6] Cubeful equity
+     */
+    double cubeful_outputs[2][GNUBGAPI_NUM_ROLLOUT_OUTPUTS];
+
+    /*
+     * 4-element equity summary from the offerer's perspective:
+     *   [0] OPTIMAL  — equity of the right decision
+     *   [1] NODOUBLE — equity if the offerer does not double
+     *   [2] TAKE     — equity if doubled and taken
+     *   [3] DROP     — equity if doubled and dropped (+1 in money games,
+     *                  match-score-normalized in match play)
+     */
+    double equities[4];
+
+    /*
+     * gnubg's `cubedecision` enum value. See GNUBGAPI_CUBE_DECISION_*
+     * constants below for the stable wire format. Callers that don't
+     * care about every distinction can collapse the optional/redouble
+     * variants down to the four basic outcomes (DOUBLE/TAKE,
+     * DOUBLE/PASS, NODOUBLE/TAKE, TOOGOOD/PASS).
+     */
+    int32_t decision;
+} gnubgapi_cube_decision_result;
+
+/*
+ * cubedecision enum values mirrored from gnubg's eval.h. The integer
+ * values are stable across gnubgapi versions; callers should reference
+ * these constants rather than the underlying enum ordinals.
+ */
+#define GNUBGAPI_CUBE_DECISION_DOUBLE_TAKE             0
+#define GNUBGAPI_CUBE_DECISION_DOUBLE_PASS             1
+#define GNUBGAPI_CUBE_DECISION_NODOUBLE_TAKE           2
+#define GNUBGAPI_CUBE_DECISION_TOOGOOD_TAKE            3
+#define GNUBGAPI_CUBE_DECISION_TOOGOOD_PASS            4
+#define GNUBGAPI_CUBE_DECISION_DOUBLE_BEAVER           5
+#define GNUBGAPI_CUBE_DECISION_NODOUBLE_BEAVER         6
+#define GNUBGAPI_CUBE_DECISION_REDOUBLE_TAKE           7
+#define GNUBGAPI_CUBE_DECISION_REDOUBLE_PASS           8
+#define GNUBGAPI_CUBE_DECISION_NO_REDOUBLE_TAKE        9
+#define GNUBGAPI_CUBE_DECISION_TOOGOODRE_TAKE         10
+#define GNUBGAPI_CUBE_DECISION_TOOGOODRE_PASS         11
+#define GNUBGAPI_CUBE_DECISION_NO_REDOUBLE_BEAVER     12
+#define GNUBGAPI_CUBE_DECISION_NODOUBLE_DEADCUBE      13
+#define GNUBGAPI_CUBE_DECISION_NO_REDOUBLE_DEADCUBE   14
+#define GNUBGAPI_CUBE_DECISION_NOT_AVAILABLE          15
+#define GNUBGAPI_CUBE_DECISION_OPTIONAL_DOUBLE_TAKE   16
+#define GNUBGAPI_CUBE_DECISION_OPTIONAL_REDOUBLE_TAKE 17
+#define GNUBGAPI_CUBE_DECISION_OPTIONAL_DOUBLE_BEAVER 18
+#define GNUBGAPI_CUBE_DECISION_OPTIONAL_DOUBLE_PASS   19
+#define GNUBGAPI_CUBE_DECISION_OPTIONAL_REDOUBLE_PASS 20
+
+/*
+ * Evaluate the cube decision at the given position.
+ *
+ * Runs GeneralCubeDecisionE (which produces the 2x7 cubeful outputs)
+ * followed by FindCubeDecision (which derives the 4-element equity
+ * summary and the recommended cubedecision enum value).
+ *
+ * n_plies: evaluation depth (0 = neural-net only, 2 = world-class).
+ * out: receives the full cube-decision result.
+ */
+GNUBGAPI_EXPORT gnubgapi_status gnubgapi_evaluate_cube_decision(
+    gnubgapi_context *ctx,
+    const char *position_id,
+    const char *match_id,
+    uint32_t n_plies,
+    gnubgapi_cube_decision_result *out
+);
+
+/* ------------------------------------------------------------------ */
 /* Feature encoding API                                               */
 /* ------------------------------------------------------------------ */
 
