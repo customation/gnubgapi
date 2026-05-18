@@ -27,10 +27,20 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Checkout (with submodules)
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
+        # Do not let actions/checkout fetch submodules — it shallow-clones
+        # with --depth 1, which only resolves objects reachable from the
+        # registered branch's current tip. Our gnubg submodule is pinned
+        # to a commit that upstream master has since moved past, so the
+        # shallow fetch fails to land the pinned object. Fetch it
+        # explicitly below with full depth instead.
+
+      - name: Initialise gnubg submodule (full depth)
+        shell: bash
+        run: |
+          git submodule init
+          git submodule update --recursive
 
       # --- Windows (MSYS2/MinGW64) ---
       - name: Setup MSYS2
