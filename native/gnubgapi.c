@@ -1453,270 +1453,36 @@ static int escapes_count(const unsigned int opp[25], int n) {
 }
 
 /*
- * Compute 24 contact features for one side.
- * Matches Python _contact_features() in features.py exactly.
+ * gnubg's real per-side contact/crashed inputs (25 per side), assembled from
+ * gnubg's own functions (un-static'd in eval.c; logic untouched) so the API
+ * emits exactly the inputs gnubg's net consumes, with no reimplemented feature
+ * math in this wrapper:
  *
- * own: this side's 25-element board (own perspective, index 0 = 1-point).
- * opp: opponent's 25-element board (opponent's perspective).
- * out: receives 24 floats.
+ *   out[0..2]  = men-off triple, via menOffAll (full 0..15-off range, no
+ *                contact-domain assert). This is gnubg's CRASHED-net men-off
+ *                encoding -- the only one valid across every position class, so
+ *                a single student net can consume it everywhere (contact,
+ *                crashed, backgame, race, bearoff). gnubg's contact net uses
+ *                menOffNonCrashed instead, but that asserts menOff<=8 and so
+ *                cannot serve a single net that also sees races/bearoffs.
+ *   out[3..24] = I_BREAK_CONTACT .. I_BACKRESCAPES, via CalculateHalfInputs
+ *                (identical function for gnubg's contact and crashed nets).
+ *
+ * baseInputs + menOffAll + CalculateHalfInputs is exactly gnubg's
+ * CalculateCrashedInputs (eval.c), re-laid-out per side by
+ * gnubgapi_position_to_features.
  */
-static void contact_features_24(
+extern void CalculateHalfInputs(const unsigned int anBoard[25],
+                                const unsigned int anBoardOpp[25], float afInput[]);
+extern void menOffAll(const unsigned int *anBoard, float *afInput);
+
+static void contact_features_25(
     const unsigned int own[25],
     const unsigned int opp[25],
-    float out[24]
+    float out[25]
 ) {
-    memset(out, 0, 24 * sizeof(float));
-
-    /* Total checkers on board and bar. */
-    int total_on_board = 0;
-    for (int i = 0; i < 24; i++) total_on_board += (int)own[i];
-    int total_own = total_on_board + (int)own[24];
-    int men_off = 15 - total_own;
-
-    /* --- I_OFF1 / I_OFF2 / I_OFF3 (men off, tiered encoding) --- */
-    if (men_off > 10) {
-        out[0] = 1.0f;
-        out[1] = 1.0f;
-        out[2] = (men_off - 10) / 5.0f;
-    } else if (men_off > 5) {
-        out[0] = 1.0f;
-        out[1] = (men_off - 5) / 5.0f;
-    } else if (men_off > 0) {
-        out[0] = men_off / 5.0f;
-    }
-
-    /* --- Find key positions --- */
-    int back_chequer = -1;
-    for (int i = 23; i >= 0; i--) {
-        if (own[i] > 0) { back_chequer = i; break; }
-    }
-
-    int back_anchor = -1;
-    for (int i = 23; i >= 0; i--) {
-        if (own[i] >= 2) { back_anchor = i; break; }
-    }
-
-    int forward_anchor = -1;
-    for (int i = 0; i < 24; i++) {
-        if (own[i] >= 2) { forward_anchor = i; break; }
-    }
-
-    int opp_back = -1;
-    for (int i = 23; i >= 0; i--) {
-        if (opp[i] > 0) { opp_back = i; break; }
-    }
-
-    /* --- I_BREAK_CONTACT: pip distance to break contact --- */
-    if (opp_back >= 0) {
-        int contact_pips = 0;
-        for (int i = 0; i < 24; i++) {
-            if (own[i] > 0 && i > (23 - opp_back))
-                contact_pips += (int)own[i] * (i - (23 - opp_back));
-        }
-        out[3] = contact_pips / 152.0f;
-    }
-
-    /* --- I_BACK_CHEQUER --- */
-    out[4] = (back_chequer >= 0) ? back_chequer / 24.0f : 0.0f;
-
-    /* --- I_BACK_ANCHOR --- */
-    out[5] = (back_anchor >= 0) ? back_anchor / 24.0f : 0.0f;
-
-    /* --- I_FORWARD_ANCHOR --- */
-    if (forward_anchor >= 0) {
-        out[6] = (forward_anchor >= 18) ? (forward_anchor - 18) / 6.0f : 0.0f;
-    } else {
-        out[6] = 2.0f;  /* No anchor → max value (per convention). */
-    }
-
-    /* --- I_PIPLOSS: average pip loss from opponent hits --- */
-    {
-        float pip_loss = 0.0f;
-        for (int i = 0; i < 24; i++) {
-            if (opp[i] != 1) continue;
-            /* Opponent has a blot at their point i.
-             * From our perspective, this is at our point (23-i). */
-            int our_target = 23 - i;
-            int reach_rolls = 0;
-            for (int d = 1; d <= 6; d++) {
-                int src = our_target + d;
-                if (src < 24 && own[src] > 0)
-                    reach_rolls += 6;
-                else if (src == 24 && own[24] > 0)
-                    reach_rolls += 6;
-            }
-            /* Combined moves (d1+d2). */
-            for (int d1 = 1; d1 <= 6; d1++) {
-                for (int d2 = d1 + 1; d2 <= 6; d2++) {
-                    int src = our_target + d1 + d2;
-                    if (src >= 0 && src < 24 && own[src] > 0) {
-                        int mid1 = our_target + d1;
-                        int mid2 = our_target + d2;
-                        if ((mid1 >= 0 && mid1 < 24 && opp[23 - mid1] < 2) ||
-                            (mid2 >= 0 && mid2 < 24 && opp[23 - mid2] < 2))
-                            reach_rolls += 2;
-                    }
-                }
-            }
-            pip_loss += reach_rolls * (our_target + 1);
-        }
-        float v = pip_loss / 5000.0f;
-        out[7] = (v < 1.0f) ? v : 1.0f;
-    }
-
-    /* --- I_P1 / I_P2: simplified using blot counts --- */
-    {
-        int opp_blots = 0;
-        for (int i = 0; i < 24; i++) {
-            if (opp[i] == 1) opp_blots++;
-        }
-        float v1 = opp_blots / 6.0f;
-        out[8] = (v1 < 1.0f) ? v1 : 1.0f;
-        int excess = opp_blots - 2;
-        if (excess < 0) excess = 0;
-        float v2 = excess / 6.0f;
-        out[9] = (v2 < 1.0f) ? v2 : 1.0f;
-    }
-
-    /* --- I_BACKESCAPES: rolls letting back checker escape --- */
-    if (back_chequer >= 0 && opp_back >= 0) {
-        int esc_pos = 23 - back_chequer;
-        out[10] = escapes_count(opp, esc_pos) / 36.0f;
-    } else {
-        out[10] = 1.0f;
-    }
-
-    /* --- I_ACONTAIN / I_ACONTAIN2: containment of opponent's back --- */
-    if (opp_back >= 0) {
-        float opp_esc = escapes_count(own, opp_back) / 36.0f;
-        out[11] = 1.0f - opp_esc;
-        out[12] = out[11] * out[11];
-    }
-
-    /* --- I_CONTAIN / I_CONTAIN2: containment within home board --- */
-    if (opp_back >= 0 && opp_back <= 5) {
-        float opp_esc_home = escapes_count(own, opp_back) / 36.0f;
-        out[13] = 1.0f - opp_esc_home;
-        out[14] = out[13] * out[13];
-    }
-
-    /* --- I_MOBILITY: checker mobility --- */
-    {
-        float mobility = 0.0f;
-        for (int i = 0; i < 24; i++) {
-            if (own[i] == 0) continue;
-            for (int d = 1; d <= 6; d++) {
-                int target = i - d;
-                if (target >= 0 && target < 24) {
-                    if (opp[23 - target] < 2)
-                        mobility += (float)own[i];
-                } else if (target < 0) {
-                    /* Bearing off. */
-                    mobility += (float)own[i];
-                }
-            }
-        }
-        float v = mobility / 600.0f;
-        out[15] = (v < 1.0f) ? v : 1.0f;
-    }
-
-    /* --- I_MOMENT2: positional variance --- */
-    if (total_on_board > 0) {
-        float avg_pos = 0.0f;
-        for (int i = 0; i < 24; i++) avg_pos += i * (float)own[i];
-        avg_pos /= (float)total_on_board;
-        float variance = 0.0f;
-        for (int i = 0; i < 24; i++) {
-            if (own[i] > 0) {
-                float diff = (float)i - avg_pos;
-                variance += (float)own[i] * diff * diff;
-            }
-        }
-        variance /= (float)total_on_board;
-        out[16] = variance / 400.0f;
-    }
-
-    /* --- I_ENTER: expected pip loss when entering from bar --- */
-    if (own[24] > 0) {
-        int blocked = 0;
-        for (int i = 0; i < 6; i++) {
-            if (opp[i] >= 2) blocked++;
-        }
-        out[17] = blocked / 6.0f;
-    }
-
-    /* --- I_ENTER2: entry failure probability --- */
-    if (own[24] > 0) {
-        int blocked = 0;
-        for (int i = 0; i < 6; i++) {
-            if (opp[i] >= 2) blocked++;
-        }
-        float fail_one = blocked / 6.0f;
-        out[18] = 1.0f - (1.0f - fail_one) * (1.0f - fail_one);
-    }
-
-    /* --- I_TIMING: timing value --- */
-    {
-        int own_pips = 0;
-        for (int i = 0; i < 24; i++) own_pips += i * (int)own[i];
-        own_pips += (int)own[24] * 25;
-        /* opp_pips not used in the final formula but computed in Python;
-         * the Python code only uses own_pips in the output. */
-        int timing_adj = 0;
-        for (int i = 6; i < 24; i++) {
-            if (own[i] > 0) timing_adj++;
-        }
-        float timing_raw = (float)(own_pips + 2 * timing_adj);
-        float v = timing_raw / 100.0f;
-        out[19] = (v < 1.0f) ? v : 1.0f;
-    }
-
-    /* --- I_BACKBONE: consecutive made-point strength --- */
-    if (total_on_board > 0) {
-        int anchors[24];
-        int n_anchors = 0;
-        for (int i = 0; i < 24; i++) {
-            if (own[i] >= 2) anchors[n_anchors++] = i;
-        }
-        if (n_anchors >= 2) {
-            int max_gap = 0;
-            for (int j = 0; j < n_anchors - 1; j++) {
-                int gap = anchors[j + 1] - anchors[j];
-                if (gap > max_gap) max_gap = gap;
-            }
-            float v = 1.0f - max_gap / 12.0f;
-            out[20] = (v > 0.0f) ? v : 0.0f;
-        }
-    }
-
-    /* --- I_BACKG / I_BACKG1: backgame strength --- */
-    {
-        int deep_anchors = 0;
-        int deep_men = 0;
-        for (int i = 18; i < 24; i++) {
-            if (own[i] >= 2) deep_anchors++;
-            deep_men += (int)own[i];
-        }
-        if (deep_anchors >= 2) {
-            float v = (deep_men - 3) / 4.0f;
-            out[21] = (v < 1.0f) ? v : 1.0f;
-        }
-        if (deep_anchors >= 1) {
-            float v = deep_men / 8.0f;
-            out[22] = (v < 1.0f) ? v : 1.0f;
-        }
-    }
-
-    /* --- I_FREEPIP: free pips before contact --- */
-    if (opp_back >= 0) {
-        int free = 0;
-        for (int i = 0; i < 24; i++) {
-            if (own[i] > 0 && i < (23 - opp_back))
-                free += (int)own[i] * (i + 1);
-        }
-        float v = free / 100.0f;
-        out[23] = (v < 1.0f) ? v : 1.0f;
-    }
+    menOffAll(own, out);                 /* out[0..2]  = I_OFF1/2/3 (full 0..15 range) */
+    CalculateHalfInputs(own, opp, out);  /* out[3..24] = I_BREAK_CONTACT .. I_BACKRESCAPES */
 }
 
 gnubgapi_status gnubgapi_position_to_features(
@@ -1748,8 +1514,8 @@ gnubgapi_status gnubgapi_position_to_features(
      *
      * We need bottom[25] and top[25] each from their own perspective
      * (index 0 = that side's 1-point), then build features as:
-     *   [bottom_base(100), bottom_contact(24),
-     *    top_base(100),    top_contact(24)]
+     *   [bottom_base(100), bottom_contact(25),
+     *    top_base(100),    top_contact(25)]
      *
      * Python's _to_gnubg_boards() returns each side from their own
      * perspective.  Top's 1-point is our board index 23, so top's
@@ -1783,20 +1549,17 @@ gnubgapi_status gnubgapi_position_to_features(
     /* Base features: [0:100] = bottom, [100:200] = top. */
     baseInputs((ConstTanBoard)featureBoard, out_features);
 
-    /* Contact features: shift the top base features to make room.
-     * Currently: [bottom_base(100), top_base(100), ...]
-     * We need:   [bottom_base(100), bottom_contact(24), top_base(100), top_contact(24)]
-     *
-     * Move top_base from [100:200] to [124:224], then insert bottom_contact
-     * at [100:124] and top_contact at [224:248].
+    /* Contact features: 25 per side = gnubg's real menOffAll + CalculateHalfInputs.
+     * baseInputs gave [bottom_base(100), top_base(100)]; shift top_base to [125:225],
+     * then fill [bottom_base(100), bottom_contact(25), top_base(100), top_contact(25)] = 250.
      */
-    memmove(&out_features[124], &out_features[100], 100 * sizeof(float));
+    memmove(&out_features[125], &out_features[100], 100 * sizeof(float));
 
-    /* Bottom contact features → [100:124]. */
-    contact_features_24(bottom, top, &out_features[100]);
+    /* Bottom contact -> [100:125]. */
+    contact_features_25(bottom, top, &out_features[100]);
 
-    /* Top contact features → [224:248]. */
-    contact_features_24(top, bottom, &out_features[224]);
+    /* Top contact -> [225:250]. */
+    contact_features_25(top, bottom, &out_features[225]);
 
     set_last_error("");
     return GNUBGAPI_OK;

@@ -5,6 +5,9 @@
 *.sh       text eol=lf
 *.bash     text eol=lf
 
+# Patches MUST stay LF so `patch` / `git apply` see identical EOL on every platform
+*.patch    text eol=lf
+
 # Windows-native scripts MUST stay CRLF even on Linux
 *.bat      text eol=crlf
 *.cmd      text eol=crlf
@@ -21,6 +24,7 @@
 *.gz       binary
 *.7z       binary
 *.dll      binary
+*.a        binary
 *.exe      binary
 *.so       binary
 *.dylib    binary

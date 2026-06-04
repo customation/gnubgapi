@@ -1,0 +1,25 @@
+diff --git a/eval.c b/eval.c
+index 39f25990..df7740d6 100644
+--- a/eval.c
++++ b/eval.c
+@@ -737,7 +737,9 @@ EvalInitialise(char *szWeights, char *szWeightsBinary, int fNoBearoff, void (*pf
+ 
+ /* Calculates inputs for any contact position, for one player only. */
+ 
+-static void
++/* Visibility widened (static -> extern) so the gnubgapi wrapper can emit gnubg's
++ * real contact inputs instead of a reimplementation. Logic is unchanged. */
++void
+ CalculateHalfInputs(const unsigned int anBoard[25], const unsigned int anBoardOpp[25], float afInput[])
+ {
+     int i, j, k, l, nOppBack, n, aHit[39], nBoard;
+@@ -1474,7 +1476,8 @@ CalculateRaceInputs(const TanBoard anBoard, float inputs[])
+ 
+ /* baseInputs() is now in lib/inputs.c */
+ 
+-static void
++/* Visibility widened (static -> extern) for the gnubgapi wrapper. Logic unchanged. */
++void
+ menOffAll(const unsigned int *anBoard, float *afInput)
+ {
+     /* Men off */

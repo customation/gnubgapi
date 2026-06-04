@@ -9,6 +9,23 @@ set -euo pipefail
 NATIVE_DIR="$(cd "$(dirname "$0")" && pwd)"
 GNUBG_DIR="$NATIVE_DIR/gnubg"
 
+# The wrapper emits gnubg's REAL contact inputs by calling gnubg's own
+# CalculateHalfInputs + menOffAll (eval.c). Those are `static`, so we expose them
+# with a visibility-ONLY patch (static -> extern; no logic change) applied to the
+# pristine submodule at build time. The patch lives in THIS repo, never committed
+# into the gnubg clone — so native/gnubg stays an unmodified upstream checkout.
+# Reverted on exit so the submodule working tree is left clean.
+EXPOSE_PATCH="$NATIVE_DIR/gnubg-expose-inputs.patch"
+PATCH_APPLIED=0
+cleanup() {
+    # Restore the exact upstream blob (also normalises any EOL/stat churn `patch`
+    # introduces), leaving the pristine submodule clean.
+    if [ "$PATCH_APPLIED" = "1" ]; then
+        git -C "$GNUBG_DIR" checkout -- eval.c 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
 # Target detection: GNUBGAPI_TARGET overrides; otherwise infer from `uname`.
 # Windows builds run under MSYS2/MinGW64 and uname reports MINGW64_NT-*.
 TARGET="${GNUBGAPI_TARGET:-}"
@@ -59,6 +76,22 @@ make -C lib -j"$(nproc)"
 # Step 3: compile our wrapper, pulling required gnubg source files out of
 # the submodule by absolute path. The list mirrors what api/Makefile.am
 # upstream had as libgnubgapi_la_SOURCES.
+# Expose gnubg's static input fns for the wrapper (visibility only; see top of file).
+# GNU patch (not `git apply`) — tolerant of LF/CRLF between git builds; --batch keeps
+# it non-interactive (never prompts). --forward makes an already-applied patch a no-op.
+if [ -f "$EXPOSE_PATCH" ]; then
+    if patch -p1 -d "$GNUBG_DIR" --forward --batch --dry-run < "$EXPOSE_PATCH" >/dev/null 2>&1; then
+        echo "==> Applying visibility patch (expose CalculateHalfInputs/menOffAll; logic untouched)"
+        patch -p1 -d "$GNUBG_DIR" --forward --batch < "$EXPOSE_PATCH" >/dev/null
+        PATCH_APPLIED=1
+    elif patch -R -p1 -d "$GNUBG_DIR" --batch --dry-run < "$EXPOSE_PATCH" >/dev/null 2>&1; then
+        echo "==> Visibility patch already applied"
+    else
+        echo "ERROR: cannot apply $EXPOSE_PATCH (gnubg eval.c drift?)" >&2
+        exit 1
+    fi
+fi
+
 echo "==> Compiling libgnubgapi.so"
 GNUBG_SOURCES=(
     eval.c positionid.c matchid.c matchequity.c
