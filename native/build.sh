@@ -15,6 +15,21 @@ GNUBG_DIR="$NATIVE_DIR/gnubg"
 # pristine submodule at build time. The patch lives in THIS repo, never committed
 # into the gnubg clone — so native/gnubg stays an unmodified upstream checkout.
 # Reverted on exit so the submodule working tree is left clean.
+# Tools this needs beyond a compiler, checked before anything else runs.
+#
+# Both `patch` probes below redirect stderr to /dev/null, so a MISSING patch
+# command looked exactly like a patch that would not apply — and the script then
+# blamed gnubg's source: "cannot apply ... (gnubg eval.c drift?)". That message
+# sent whoever read it to diff eval.c against upstream, which is nowhere near
+# the problem. The Windows job failed that way for two months. A tool that is
+# not installed should say so.
+for tool in patch git; do
+    command -v "$tool" >/dev/null 2>&1 || {
+        echo "ERROR: '$tool' is not installed, and this build needs it." >&2
+        exit 1
+    }
+done
+
 EXPOSE_PATCH="$NATIVE_DIR/gnubg-expose-inputs.patch"
 PATCH_APPLIED=0
 cleanup() {

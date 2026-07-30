@@ -55,6 +55,10 @@ jobs:
           git submodule update --recursive
 
       # --- Windows (MSYS2/MinGW64) ---
+      # `patch` and `git` are NOT optional and are not always present in the
+      # MINGW64 environment: patch applies the visibility patch, git reports the
+      # gnubg revision and restores eval.c afterwards. Their absence is what broke
+      # this job for two months, disguised as a gnubg source-drift error.
       - name: Setup MSYS2
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
@@ -70,6 +74,8 @@ jobs:
             automake
             libtool
             make
+            patch
+            git
             gettext-devel
             bison
             flex
