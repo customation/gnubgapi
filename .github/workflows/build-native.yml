@@ -120,10 +120,23 @@ jobs:
         with:
           path: artifacts
 
+      # Release assets are named per RID. linux-x64 and linux-arm64 both build a
+      # file called libgnubgapi.so, and a release cannot hold two assets with one
+      # name — uploading both would silently publish whichever landed last, for
+      # the wrong architecture. The RID goes in the asset name; fetch-natives.ps1
+      # puts it back under the plain name inside runtimes/<rid>/native/.
+      - name: Name the assets by runtime
+        run: |
+          mkdir -p release
+          cp artifacts/native-win-x64/libgnubgapi.dll     release/libgnubgapi-win-x64.dll
+          cp artifacts/native-linux-x64/libgnubgapi.so    release/libgnubgapi-linux-x64.so
+          cp artifacts/native-linux-arm64/libgnubgapi.so  release/libgnubgapi-linux-arm64.so
+          ls -l release
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/native-win-x64/libgnubgapi.dll
-            artifacts/native-linux-x64/libgnubgapi.so
-            artifacts/native-linux-arm64/libgnubgapi.so
+            release/libgnubgapi-win-x64.dll
+            release/libgnubgapi-linux-x64.so
+            release/libgnubgapi-linux-arm64.so
