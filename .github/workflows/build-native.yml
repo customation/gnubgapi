@@ -16,6 +16,8 @@ concurrency:
 jobs:
   build:
     strategy:
+      # A broken arm64 build should not withdraw the two that work.
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
@@ -23,6 +25,16 @@ jobs:
             output-name: libgnubgapi.dll
           - os: ubuntu-latest
             rid: linux-x64
+            output-name: libgnubgapi.so
+          # arm64, built natively on GitHub's ARM runners — free here because
+          # this repository is public. Every apt package the Linux build needs
+          # exists for arm64, and the build differences in native/build.sh were
+          # always ELF-versus-PE rather than x86-versus-ARM. This is what an
+          # Apple Silicon gnubg needs first: a gnubg that compiles for ARM at
+          # all, proven on hardware we can get today rather than after an Apple
+          # developer account arrives.
+          - os: ubuntu-24.04-arm
+            rid: linux-arm64
             output-name: libgnubgapi.so
     runs-on: ${{ matrix.os }}
 
@@ -67,7 +79,7 @@ jobs:
         shell: msys2 {0}
         run: |
           cd native
-          GNUBGAPI_TARGET=win-x64 ./build.sh "$(pwd)/_out"
+          GNUBGAPI_TARGET=${{ matrix.rid }} ./build.sh "$(pwd)/_out"
 
       # --- Linux ---
       - name: Install dependencies (Linux)
@@ -80,7 +92,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           cd native
-          GNUBGAPI_TARGET=linux-x64 ./build.sh "$(pwd)/_out"
+          GNUBGAPI_TARGET=${{ matrix.rid }} ./build.sh "$(pwd)/_out"
 
       # --- Upload ---
       - name: Upload native binary
@@ -108,3 +120,4 @@ jobs:
           files: |
             artifacts/native-win-x64/libgnubgapi.dll
             artifacts/native-linux-x64/libgnubgapi.so
+            artifacts/native-linux-arm64/libgnubgapi.so

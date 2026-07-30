@@ -32,13 +32,25 @@ TARGET="${GNUBGAPI_TARGET:-}"
 if [ -z "$TARGET" ]; then
     case "$(uname -s)" in
         MINGW64_NT*|MSYS_NT*|CYGWIN_NT*) TARGET="win-x64" ;;
-        Linux)                            TARGET="linux-x64" ;;
+        Linux)
+            case "$(uname -m)" in
+                x86_64)        TARGET="linux-x64" ;;
+                aarch64|arm64) TARGET="linux-arm64" ;;
+                *) echo "ERROR: unrecognised Linux machine $(uname -m); set GNUBGAPI_TARGET" >&2; exit 1 ;;
+            esac
+            ;;
         *) echo "ERROR: unrecognised host $(uname -s); set GNUBGAPI_TARGET" >&2; exit 1 ;;
     esac
 fi
+
+# TARGET_OS, not TARGET, is what the compiler flags below branch on. Every
+# difference between these builds is ELF-versus-PE — position independence,
+# import libraries, symbol export — and none of it is about the instruction
+# set. Branching on the full RID made the two look like x86 decisions and was
+# the only thing standing between this script and an arm64 build.
 case "$TARGET" in
-    linux-x64) OUT_NAME="libgnubgapi.so" ;;
-    win-x64)   OUT_NAME="libgnubgapi.dll" ;;
+    linux-x64|linux-arm64) OUT_NAME="libgnubgapi.so";  TARGET_OS="linux" ;;
+    win-x64)               OUT_NAME="libgnubgapi.dll"; TARGET_OS="windows" ;;
     *) echo "ERROR: unsupported target '$TARGET'" >&2; exit 1 ;;
 esac
 OUT_DIR="${1:-$NATIVE_DIR/../runtimes/$TARGET/native}"
@@ -62,7 +74,7 @@ autoreconf -fi
 # Inject CFLAGS at configure time so gnubg's Makefiles bake it in everywhere
 # instead of trying to override per-target later.
 CFG_CFLAGS="-O3 -ffast-math"
-if [ "$TARGET" = "linux-x64" ]; then CFG_CFLAGS="$CFG_CFLAGS -fPIC"; fi
+if [ "$TARGET_OS" = "linux" ]; then CFG_CFLAGS="$CFG_CFLAGS -fPIC"; fi
 CFLAGS="$CFG_CFLAGS" ./configure --without-python --without-gtk --without-board3d --quiet
 
 # Step 2: build gnubg's lib/libevent.la — the only internal static lib our
@@ -118,7 +130,7 @@ COMMON_FLAGS=(
     -lgmp -lm
 )
 
-if [ "$TARGET" = "linux-x64" ]; then
+if [ "$TARGET_OS" = "linux" ]; then
     gcc -fPIC "${COMMON_FLAGS[@]}" -o "$OUT_DIR/$OUT_NAME"
 else
     # MinGW64: -fPIC is implicit on Windows DLLs and emits a noise warning.
