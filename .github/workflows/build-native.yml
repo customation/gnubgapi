@@ -36,6 +36,22 @@ jobs:
           - os: ubuntu-24.04-arm
             rid: linux-arm64
             output-name: libgnubgapi.so
+          # macOS, which is what the arm64 row above was groundwork for. The
+          # architecture question is already answered; what is new here is
+          # Mach-O and Homebrew — a different shared-library flag, a prefix the
+          # compiler does not search by default, and an Apple bison from 2006
+          # that has to be pushed off PATH. All of that lives in
+          # native/build.sh, not here.
+          #
+          # macos-latest is Apple Silicon (3-core M1). Intel Macs are still in
+          # venues and their runner label is suffixed rather than versioned:
+          # macos-15-intel, not the macos-13 that older guides name.
+          - os: macos-latest
+            rid: osx-arm64
+            output-name: libgnubgapi.dylib
+          - os: macos-15-intel
+            rid: osx-x64
+            output-name: libgnubgapi.dylib
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -99,6 +115,40 @@ jobs:
         run: |
           cd native
           GNUBGAPI_TARGET=${{ matrix.rid }} ./build.sh "$(pwd)/_out"
+
+      # --- macOS ---
+      # The same set the Linux job installs from apt, by Homebrew's names.
+      # clang, make and git come with the Xcode command line tools, which are
+      # preinstalled on these images.
+      #
+      # bison and flex are the two that matter and the two that look redundant:
+      # macOS already has both at /usr/bin, and both are far too old for
+      # gnubg's autoreconf. Homebrew installs them keg-only — present but
+      # deliberately off PATH — and native/build.sh puts them in front of
+      # Apple's. Removing them here because "macOS already has bison" is what
+      # would break this job.
+      #
+      # HOMEBREW_NO_AUTO_UPDATE keeps a build from spending minutes updating
+      # formulae it is not going to use, and stops an upstream formula bump
+      # from changing what this job installs without anyone asking for it.
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_INSTALL_CLEANUP: 1
+        run: |
+          brew install glib gmp pkg-config autoconf automake libtool gettext bison flex
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd native
+          GNUBGAPI_TARGET=${{ matrix.rid }} ./build.sh "$(pwd)/_out"
+          # A dylib that is the wrong architecture links and uploads happily and
+          # then fails to load on a user's machine, so state what was actually
+          # produced while the answer is still in the log.
+          lipo -archs "_out/${{ matrix.output-name }}"
+          otool -L "_out/${{ matrix.output-name }}"
 
       # --- Upload ---
       - name: Upload native binary
