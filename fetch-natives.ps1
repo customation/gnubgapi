@@ -1,7 +1,10 @@
 Param(
   [string]$Tag = 'latest',
   [string]$Owner = 'customation',
-  [string]$Repo = 'gnubg'
+  # This repository, which is where build-native.yml publishes the release. The
+  # default used to be 'gnubg' -- a repo that holds no such assets -- so every
+  # invocation without an explicit -Repo failed at the download.
+  [string]$Repo = 'gnubgapi'
 )
 
 $ErrorActionPreference = 'Stop'
