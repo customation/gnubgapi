@@ -211,9 +211,35 @@ gnubgapi_status gnubgapi_init(
             return GNUBGAPI_E_INVALID_ARGUMENT;
         }
     }
+    /*
+     * ORDER IS LOAD-BEARING: the nets must be loaded before any thread-local
+     * state is created. gnubg's own main does exactly this — EvalInitialise at
+     * gnubg.c:4381, MT_InitThreads at gnubg.c:4714 — and the wrapper had it
+     * inverted.
+     *
+     * MT_CreateThreadLocalData (mtsupport.c:41) sizes each thread's incremental
+     * evaluation buffers from the loaded networks:
+     *
+     *     savedIBase = g_malloc0(nnContact.cInput * sizeof(float));
+     *
+     * Called before EvalInitialise, nnContact.cInput is still 0, so every
+     * thread gets a ZERO-LENGTH buffer. NeuralNetEvaluate then memcpys
+     * pnn->cInput floats into it (neuralnet.c:229) once the real net is loaded
+     * — a 1000-byte write into a 0-byte allocation, on every contact
+     * evaluation.
+     *
+     * That is a heap overflow, not a crash, which is why it survived: on x86 the
+     * allocator's slack absorbed it and the engine produced correct answers for
+     * months. On linux-aarch64 it segfaults, reliably, on the first
+     * evaluateMoves call — SIGSEGV in memcpy under EvalContact, which is how it
+     * was found. Any platform "working" here was luck, not correctness.
+     *
+     * MT_StartThreads spawns the workers, and each one builds its own
+     * thread-local data, so it has to follow the load too.
+     */
+    EvalInitialise((char *)weights_path, (char *)weights_binary_path, no_bearoff, NULL);
     MT_InitThreads();
     MT_StartThreads();
-    EvalInitialise((char *)weights_path, (char *)weights_binary_path, no_bearoff, NULL);
 
     /*
      * Load the match equity table. gnubg's main app does this in gnubg.c

@@ -178,9 +178,11 @@ jobs:
       - name: Name the assets by runtime
         run: |
           mkdir -p release
-          cp artifacts/native-win-x64/libgnubgapi.dll     release/libgnubgapi-win-x64.dll
-          cp artifacts/native-linux-x64/libgnubgapi.so    release/libgnubgapi-linux-x64.so
-          cp artifacts/native-linux-arm64/libgnubgapi.so  release/libgnubgapi-linux-arm64.so
+          cp artifacts/native-win-x64/libgnubgapi.dll        release/libgnubgapi-win-x64.dll
+          cp artifacts/native-linux-x64/libgnubgapi.so       release/libgnubgapi-linux-x64.so
+          cp artifacts/native-linux-arm64/libgnubgapi.so     release/libgnubgapi-linux-arm64.so
+          cp artifacts/native-osx-arm64/libgnubgapi.dylib    release/libgnubgapi-osx-arm64.dylib
+          cp artifacts/native-osx-x64/libgnubgapi.dylib      release/libgnubgapi-osx-x64.dylib
           ls -l release
 
       - name: Create release
@@ -190,3 +192,5 @@ jobs:
             release/libgnubgapi-win-x64.dll
             release/libgnubgapi-linux-x64.so
             release/libgnubgapi-linux-arm64.so
+            release/libgnubgapi-osx-arm64.dylib
+            release/libgnubgapi-osx-x64.dylib

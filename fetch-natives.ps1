@@ -10,12 +10,15 @@ $runtimesDir = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) 'runt
 
 # Asset is what the release publishes; File is what the runtime folder must
 # contain. They differ because linux-x64 and linux-arm64 both build a file
-# called libgnubgapi.so — a release cannot hold two assets under one name, so
+# called libgnubgapi.so — and osx-arm64 and osx-x64 both build
+# libgnubgapi.dylib — while a release cannot hold two assets under one name, so
 # the RID is in the asset name and stripped back off here.
 $targets = @(
-  @{ Rid = 'win-x64';     Asset = 'libgnubgapi-win-x64.dll';    File = 'libgnubgapi.dll' },
-  @{ Rid = 'linux-x64';   Asset = 'libgnubgapi-linux-x64.so';   File = 'libgnubgapi.so' },
-  @{ Rid = 'linux-arm64'; Asset = 'libgnubgapi-linux-arm64.so'; File = 'libgnubgapi.so' }
+  @{ Rid = 'win-x64';     Asset = 'libgnubgapi-win-x64.dll';      File = 'libgnubgapi.dll' },
+  @{ Rid = 'linux-x64';   Asset = 'libgnubgapi-linux-x64.so';     File = 'libgnubgapi.so' },
+  @{ Rid = 'linux-arm64'; Asset = 'libgnubgapi-linux-arm64.so';   File = 'libgnubgapi.so' },
+  @{ Rid = 'osx-arm64';   Asset = 'libgnubgapi-osx-arm64.dylib';  File = 'libgnubgapi.dylib' },
+  @{ Rid = 'osx-x64';     Asset = 'libgnubgapi-osx-x64.dylib';    File = 'libgnubgapi.dylib' }
 )
 
 foreach ($target in $targets) {
