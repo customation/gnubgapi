@@ -20,8 +20,12 @@ $targets = @(
   @{ Rid = 'win-x64';     Asset = 'libgnubgapi-win-x64.dll';      File = 'libgnubgapi.dll' },
   @{ Rid = 'linux-x64';   Asset = 'libgnubgapi-linux-x64.so';     File = 'libgnubgapi.so' },
   @{ Rid = 'linux-arm64'; Asset = 'libgnubgapi-linux-arm64.so';   File = 'libgnubgapi.so' },
-  @{ Rid = 'osx-arm64';   Asset = 'libgnubgapi-osx-arm64.dylib';  File = 'libgnubgapi.dylib' },
-  @{ Rid = 'osx-x64';     Asset = 'libgnubgapi-osx-x64.dylib';    File = 'libgnubgapi.dylib' }
+  # macOS assets are tarballs, not single files: build.sh bundles glib, gobject,
+  # gthread, libintl, gmp and pcre2 beside the library and rewrites the
+  # references to @loader_path, so they only work together. Archive = $true
+  # means "extract into the runtime folder" rather than "copy and rename".
+  @{ Rid = 'osx-arm64';   Asset = 'libgnubgapi-osx-arm64.tar.gz'; Archive = $true },
+  @{ Rid = 'osx-x64';     Asset = 'libgnubgapi-osx-x64.tar.gz';   Archive = $true }
 )
 
 foreach ($target in $targets) {
@@ -40,7 +44,21 @@ foreach ($target in $targets) {
 
     # Land it under the name the loader expects, inside its own RID folder.
     $downloaded = Join-Path $dir $target.Asset
-    if (Test-Path $downloaded) {
+    if ($target.Archive) {
+      if (-not (Test-Path $downloaded)) {
+        throw "$($target.Asset) is not present in $dir after download"
+      }
+      # tar ships with Windows 10 1803 and later. Extracting in place gives the
+      # library and every dylib bundled beside it, which is the point: a macOS
+      # runtime folder holding only libgnubgapi.dylib is one that cannot load.
+      tar -xzf $downloaded -C $dir
+      if ($LASTEXITCODE -ne 0) { throw "could not extract $($target.Asset)" }
+      Remove-Item $downloaded -Force
+      $dylibs = @(Get-ChildItem -Path $dir -Filter *.dylib)
+      if ($dylibs.Count -lt 2) {
+        throw "$($target.Rid) has $($dylibs.Count) dylib(s) after extraction; the bundled dependencies are missing"
+      }
+    } elseif (Test-Path $downloaded) {
       Move-Item -Path $downloaded -Destination $dest -Force
     } elseif (-not (Test-Path $dest)) {
       throw "neither $($target.Asset) nor $($target.File) is present in $dir after download"

@@ -151,11 +151,17 @@ jobs:
           otool -L "_out/${{ matrix.output-name }}"
 
       # --- Upload ---
-      - name: Upload native binary
+      # The whole output directory, not one named file. Linux and Windows build a
+      # single library; macOS builds seven, because native/build.sh copies glib,
+      # gobject, gthread, libintl, gmp and pcre2 in beside it and rewrites the
+      # references to @loader_path. Uploading only the named file shipped a
+      # library pointing at siblings that were left on the runner — which loads
+      # even less well than the absolute Homebrew paths it replaced.
+      - name: Upload native binaries
         uses: actions/upload-artifact@v4
         with:
           name: native-${{ matrix.rid }}
-          path: native/_out/${{ matrix.output-name }}
+          path: native/_out/
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -181,8 +187,25 @@ jobs:
           cp artifacts/native-win-x64/libgnubgapi.dll        release/libgnubgapi-win-x64.dll
           cp artifacts/native-linux-x64/libgnubgapi.so       release/libgnubgapi-linux-x64.so
           cp artifacts/native-linux-arm64/libgnubgapi.so     release/libgnubgapi-linux-arm64.so
-          cp artifacts/native-osx-arm64/libgnubgapi.dylib    release/libgnubgapi-osx-arm64.dylib
-          cp artifacts/native-osx-x64/libgnubgapi.dylib      release/libgnubgapi-osx-x64.dylib
+
+          # macOS ships as a tarball because it is not one file: the library and
+          # the six dependencies bundled beside it only work together, and a
+          # release asset is a single file. tar also preserves the executable bit
+          # and, unlike zip, does not need a tool the runner might not have.
+          tar -czf release/libgnubgapi-osx-arm64.tar.gz -C artifacts/native-osx-arm64 .
+          tar -czf release/libgnubgapi-osx-x64.tar.gz   -C artifacts/native-osx-x64   .
+
+          # A macOS tarball holding only the library means the bundling step did
+          # not run or its output was not uploaded — which would publish an
+          # engine that cannot load, silently.
+          for arch in arm64 x64; do
+            count=$(tar -tzf "release/libgnubgapi-osx-$arch.tar.gz" | grep -c '\.dylib$')
+            if [ "$count" -lt 2 ]; then
+              echo "::error::libgnubgapi-osx-$arch.tar.gz holds $count dylib(s); the bundled dependencies are missing"
+              exit 1
+            fi
+            echo "osx-$arch: $count dylibs"
+          done
           ls -l release
 
       - name: Create release
@@ -192,5 +215,5 @@ jobs:
             release/libgnubgapi-win-x64.dll
             release/libgnubgapi-linux-x64.so
             release/libgnubgapi-linux-arm64.so
-            release/libgnubgapi-osx-arm64.dylib
-            release/libgnubgapi-osx-x64.dylib
+            release/libgnubgapi-osx-arm64.tar.gz
+            release/libgnubgapi-osx-x64.tar.gz
