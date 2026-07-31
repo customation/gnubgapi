@@ -133,7 +133,21 @@ autoreconf -fi
 # instead of trying to override per-target later.
 CFG_CFLAGS="-O3 -ffast-math"
 if [ "$TARGET_OS" = "linux" ]; then CFG_CFLAGS="$CFG_CFLAGS -fPIC"; fi
-CFLAGS="$CFG_CFLAGS" ./configure --without-python --without-gtk --without-board3d --quiet
+# --without-libcurl is not optional and is not about size. gnubg's dice.c calls
+# getDiceRandomDotOrg() -- which fetches dice from random.org over the network --
+# whenever configure finds libcurl. That function lives in randomorg.c, which is
+# deliberately NOT in the source list below, so the reference does not resolve
+# and the link fails.
+#
+# Linux and Windows never hit this only because their build images have no curl
+# development package, so the check quietly failed and the code was compiled out.
+# macOS ships libcurl, the check succeeded, and the arm64 link died on an
+# undefined _getDiceRandomDotOrg. Relying on a dependency happening to be absent
+# is not a decision; this makes it one.
+#
+# It is also the behaviour we want on every platform. This is a headless analysis
+# daemon: it must never reach the network to roll dice.
+CFLAGS="$CFG_CFLAGS" ./configure --without-python --without-gtk --without-board3d --without-libcurl --quiet
 
 # Step 2: build gnubg's lib/libevent.la — the only internal static lib our
 # wrapper transitively depends on (queues + event loop helpers used by
