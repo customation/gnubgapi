@@ -264,4 +264,75 @@ case "$TARGET_OS" in
         ;;
 esac
 
+# On macOS the library links glib, gobject, gthread, gettext's libintl and gmp
+# by ABSOLUTE Homebrew path -- /opt/homebrew/opt/... on Apple Silicon,
+# /usr/local/... on Intel. No user has those, so a dylib shipped as-is cannot
+# load on any machine but the build runner.
+#
+# Windows already solves this by shipping libglib-2.0-0.dll, libgmp-10.dll and
+# their siblings beside libgnubgapi.dll. Do the same here: copy each dependency
+# next to the output and rewrite the reference to @loader_path, which resolves
+# relative to the file holding it.
+#
+# Recursive, not a fixed list. glib itself pulls in libintl, libpcre2 and libffi,
+# and those have their own dependencies; a hand-written list would be correct on
+# the day it was written and quietly wrong after the next Homebrew bump. System
+# libraries (/usr/lib, /System) are left alone -- they are part of macOS and
+# present everywhere.
+if [ "$TARGET_OS" = "macos" ]; then
+    echo "==> Bundling Homebrew dependencies"
+
+    # Dependencies of a Mach-O, excluding itself and anything shipped with macOS.
+    deps_of() {
+        otool -L "$1" | tail -n +2 | awk '{print $1}' \
+            | grep -vE '^(/usr/lib/|/System/)' || true
+    }
+
+    # Its own install name must be @loader_path too, or anything that links
+    # against a bundled copy records the build machine's path.
+    install_name_tool -id "@loader_path/$OUT_NAME" "$OUT_DIR/$OUT_NAME"
+
+    queue="$OUT_DIR/$OUT_NAME"
+    bundled=""
+    while [ -n "$queue" ]; do
+        current="${queue%% *}"
+        queue="${queue#"$current"}"; queue="${queue# }"
+
+        for dep in $(deps_of "$current"); do
+            name="$(basename "$dep")"
+            # A bundled library's own id shows up in its otool output; skip it.
+            case "$dep" in @loader_path/*) continue ;; esac
+            case " $bundled " in *" $name "*) ;; *)
+                if [ ! -f "$dep" ]; then
+                    echo "ERROR: '$current' needs '$dep', which does not exist." >&2
+                    exit 1
+                fi
+                echo "    bundling $name"
+                cp -f "$dep" "$OUT_DIR/$name"
+                chmod u+w "$OUT_DIR/$name"
+                install_name_tool -id "@loader_path/$name" "$OUT_DIR/$name"
+                bundled="$bundled $name"
+                queue="$queue $OUT_DIR/$name"
+            ;; esac
+            install_name_tool -change "$dep" "@loader_path/$name" "$current"
+        done
+    done
+
+    # Rewriting an install name invalidates any signature the library carried,
+    # and Homebrew ships ad-hoc signed dylibs -- so re-sign ad-hoc here. The
+    # release workflow replaces these with Developer ID signatures; without this
+    # step the intermediate state will not even load on Apple Silicon, which
+    # refuses unsigned code outright.
+    for f in "$OUT_DIR"/*.dylib; do
+        codesign --force --sign - "$f" 2>/dev/null || true
+    done
+
+    echo "==> Final linkage:"
+    otool -L "$OUT_DIR/$OUT_NAME" | sed 's/^/    /'
+    if otool -L "$OUT_DIR/$OUT_NAME" | tail -n +2 | grep -qvE '@loader_path/|/usr/lib/|/System/'; then
+        echo "ERROR: $OUT_NAME still references a path outside the bundle." >&2
+        exit 1
+    fi
+fi
+
 echo "==> Done: $OUT_DIR/$OUT_NAME"
