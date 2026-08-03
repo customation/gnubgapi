@@ -743,6 +743,232 @@ gnubgapi_status gnubgapi_rollout_position(
     return GNUBGAPI_OK;
 }
 
+/* Defined with the move generation API below; the rollout entry points
+ * need it to report which play each rolled-out result belongs to. */
+static void fill_move_result(gnubgapi_move *out, const move *m);
+
+gnubgapi_status gnubgapi_rollout_cube(
+    gnubgapi_context *ctx,
+    const char *position_id,
+    const char *match_id,
+    const gnubgapi_rollout_settings *settings,
+    gnubgapi_cube_decision_result *out_result,
+    double out_std_dev[2][GNUBGAPI_NUM_ROLLOUT_OUTPUTS]
+) {
+    if (!out_result) {
+        set_last_error("out_result is null");
+        return GNUBGAPI_E_INVALID_ARGUMENT;
+    }
+
+    TanBoard board;
+    cubeinfo ci;
+    gnubgapi_status st = parse_position_and_cubeinfo(ctx, position_id, match_id, board, &ci);
+    if (st != GNUBGAPI_OK) return st;
+
+    gnubgapi_rollout_settings defaults;
+    if (!settings) {
+        gnubgapi_rollout_settings_default(&defaults);
+        settings = &defaults;
+    }
+
+    /*
+     * GeneralCubeDecisionR copies its rollout context from the global
+     * rcRollout when pes is NULL, exactly as GeneralEvaluationR does, so
+     * install ours the same way rollout_position does and restore after.
+     * gnubg forces a cube rollout cubeful internally regardless of what
+     * we set here — a cubeless cube decision is not a question.
+     */
+    rolloutcontext rcSave = rcRollout;
+    build_rollout_context(&rcRollout, settings);
+
+    float aarOutput[2][NUM_ROLLOUT_OUTPUTS];
+    float aarStdDev[2][NUM_ROLLOUT_OUTPUTS];
+    rolloutstat aarsStatistics[2][2];
+    memset(aarsStatistics, 0, sizeof(aarsStatistics));
+
+    int rc = GeneralCubeDecisionR(aarOutput, aarStdDev, aarsStatistics,
+                                  (ConstTanBoard)board, &ci, &rcRollout,
+                                  NULL, NULL, NULL);
+    rcRollout = rcSave;
+
+    if (rc < 0) {
+        char errmsg[256];
+        snprintf(errmsg, sizeof(errmsg), "cube rollout failed (rc=%d)", rc);
+        set_last_error(errmsg);
+        return GNUBGAPI_E_INTERNAL;
+    }
+
+    /*
+     * Derive the cube action from the ROLLED-OUT outputs with gnubg's own
+     * FindCubeDecision, exactly as gnubgapi_evaluate_cube_decision does
+     * from evaluated ones. Re-evaluating here instead would answer a
+     * different question than the one just rolled out.
+     */
+    float arDouble[NUM_CUBEFUL_OUTPUTS];
+    cubedecision cd = FindCubeDecision(arDouble, aarOutput, &ci);
+
+    for (int r = 0; r < 2; r++) {
+        for (int i = 0; i < GNUBGAPI_NUM_ROLLOUT_OUTPUTS; i++) {
+            out_result->cubeful_outputs[r][i] = (double)aarOutput[r][i];
+            if (out_std_dev) out_std_dev[r][i] = (double)aarStdDev[r][i];
+        }
+    }
+    for (int i = 0; i < NUM_CUBEFUL_OUTPUTS; i++) {
+        out_result->equities[i] = (double)arDouble[i];
+    }
+    out_result->decision = (int32_t)cd;
+
+    set_last_error("");
+    return GNUBGAPI_OK;
+}
+
+/* Sort helper: best-first by the rolled-out score. */
+static int compare_rolled_move(const void *a, const void *b) {
+    double sa = ((const gnubgapi_rolled_move *)a)->score;
+    double sb = ((const gnubgapi_rolled_move *)b)->score;
+    if (sa > sb) return -1;
+    if (sa < sb) return 1;
+    return 0;
+}
+
+gnubgapi_status gnubgapi_rollout_moves(
+    gnubgapi_context *ctx,
+    const char *position_id,
+    const char *match_id,
+    int die1,
+    int die2,
+    uint32_t n_plies,
+    uint32_t max_moves,
+    const gnubgapi_rollout_settings *settings,
+    gnubgapi_rolled_move *out_moves,
+    uint32_t *out_count
+) {
+    if (!out_moves || !out_count) {
+        set_last_error("output arrays are null");
+        return GNUBGAPI_E_INVALID_ARGUMENT;
+    }
+    if (die1 < 1 || die1 > 6 || die2 < 1 || die2 > 6) {
+        set_last_error("dice values must be 1-6");
+        return GNUBGAPI_E_INVALID_ARGUMENT;
+    }
+
+    TanBoard board;
+    cubeinfo ci;
+    gnubgapi_status st = parse_position_and_cubeinfo(ctx, position_id, match_id, board, &ci);
+    if (st != GNUBGAPI_OK) return st;
+
+    gnubgapi_rollout_settings defaults;
+    if (!settings) {
+        gnubgapi_rollout_settings_default(&defaults);
+        settings = &defaults;
+    }
+
+    /*
+     * Shortlist first. Rolling out every legal play is rarely wanted, so
+     * rank at n_plies and roll out the best max_moves. Same evaluation
+     * setup as generate_moves_with_eval, including the non-truncating
+     * filter — see the long comment there for why the filter matters:
+     * without it the outer iterative-deepening loop drops moves and
+     * leaves their cubeful equity at the prune net's -1 placeholder,
+     * which would corrupt the ranking we are about to shortlist on.
+     */
+    evalcontext ec = {
+        .fCubeful = TRUE,
+        .nPlies = (unsigned int)n_plies,
+        .fUsePrune = TRUE,
+        .fDeterministic = TRUE,
+        .rNoise = 0.0f
+    };
+    movefilter no_truncate[MAX_FILTER_PLIES][MAX_FILTER_PLIES];
+    memset(no_truncate, 0, sizeof(no_truncate));
+    for (int i = 0; i < MAX_FILTER_PLIES; i++)
+        for (int j = 0; j < MAX_FILTER_PLIES; j++)
+            no_truncate[i][j].Accept = MAX_MOVES;
+
+    movelist ml;
+    memset(&ml, 0, sizeof(ml));
+    if (FindnSaveBestMoves(&ml, die1, die2, (ConstTanBoard)board,
+                           NULL, FALSE, 0.0f, &ci, &ec, no_truncate) < 0) {
+        set_last_error("FindnSaveBestMoves failed");
+        return GNUBGAPI_E_INTERNAL;
+    }
+    if (ml.cMoves == 0) {
+        *out_count = 0;
+        set_last_error("");
+        return GNUBGAPI_OK;
+    }
+
+    unsigned int count = ml.cMoves;
+    if (max_moves > 0 && max_moves < count) count = max_moves;
+
+    /*
+     * The settings go in the GLOBAL rcRollout, same as rollout_position.
+     *
+     * It is tempting to set each move's esMove.rc instead, since
+     * RolloutGeneral does `prc = &apes[alt]->rc`. That is a trap: for a
+     * rollout that is starting fresh it immediately does
+     *
+     *     memcpy(prc, &rcRollout, sizeof(rolloutcontext));
+     *
+     * throwing the per-move context away, and it takes the trial count
+     * from the global too (`cGames = rcRollout.nTrials`). A per-move
+     * context is only honoured when RESUMING a rollout — et == EVAL_ROLLOUT
+     * with nGamesDone > 0. Setting it here and not the global silently ran
+     * every request at gnubg's 1296-trial defaults while appearing to
+     * accept the caller's settings.
+     *
+     * Each move's esMove is zeroed so the fresh-rollout branch is taken
+     * unambiguously rather than resuming whatever the ranking evaluation
+     * left behind.
+     */
+    rolloutcontext rcSave = rcRollout;
+    build_rollout_context(&rcRollout, settings);
+
+    move **ppm = (move **)malloc(count * sizeof(move *));
+    cubeinfo **ppci = (cubeinfo **)malloc(count * sizeof(cubeinfo *));
+    if (!ppm || !ppci) {
+        free(ppm);
+        free(ppci);
+        rcRollout = rcSave;
+        set_last_error("out of memory");
+        return GNUBGAPI_E_INTERNAL;
+    }
+    for (unsigned int i = 0; i < count; i++) {
+        memset(&ml.amMoves[i].esMove, 0, sizeof(ml.amMoves[i].esMove));
+        ppm[i] = &ml.amMoves[i];
+        ppci[i] = &ci;
+    }
+
+    int rc = ScoreMoveRollout(ppm, ppci, (int)count, NULL, NULL);
+    rcRollout = rcSave;
+    free(ppm);
+    free(ppci);
+
+    if (rc < 0) {
+        char errmsg[256];
+        snprintf(errmsg, sizeof(errmsg), "move rollout failed (rc=%d)", rc);
+        set_last_error(errmsg);
+        return GNUBGAPI_E_INTERNAL;
+    }
+
+    for (unsigned int i = 0; i < count; i++) {
+        fill_move_result(&out_moves[i].move, &ml.amMoves[i]);
+        for (int j = 0; j < GNUBGAPI_NUM_ROLLOUT_OUTPUTS; j++) {
+            out_moves[i].output[j]  = (double)ml.amMoves[i].arEvalMove[j];
+            out_moves[i].std_dev[j] = (double)ml.amMoves[i].arEvalStdDev[j];
+        }
+        out_moves[i].score = (double)ml.amMoves[i].rScore;
+    }
+
+    /* Re-rank on the rollout, not on the shortlisting evaluation — a
+     * rollout that could not change the order would not be worth running. */
+    qsort(out_moves, count, sizeof(gnubgapi_rolled_move), compare_rolled_move);
+
+    *out_count = count;
+    set_last_error("");
+    return GNUBGAPI_OK;
+}
+
 /* ------------------------------------------------------------------ */
 /* Move generation API                                                */
 /* ------------------------------------------------------------------ */

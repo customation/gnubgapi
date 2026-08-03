@@ -162,6 +162,7 @@ GNUBGAPI_EXPORT gnubgapi_status gnubgapi_rollout_position(
     double out_std_dev[GNUBGAPI_NUM_ROLLOUT_OUTPUTS]
 );
 
+
 /* ------------------------------------------------------------------ */
 /* Move generation API                                                */
 /* ------------------------------------------------------------------ */
@@ -189,6 +190,52 @@ typedef struct gnubgapi_scored_move {
     double equity;                 /* cubeful equity from on-roll perspective */
     double probs[5];               /* P(win), P(winG), P(winBG), P(loseG), P(loseBG) */
 } gnubgapi_scored_move;
+
+/* A candidate play with its rolled-out result. */
+typedef struct gnubgapi_rolled_move {
+    gnubgapi_move move;
+    /* Mean over the trials, layout as GNUBGAPI_NUM_ROLLOUT_OUTPUTS. */
+    double output[GNUBGAPI_NUM_ROLLOUT_OUTPUTS];
+    /* Standard deviation per output, same layout. */
+    double std_dev[GNUBGAPI_NUM_ROLLOUT_OUTPUTS];
+    /* The score the moves are ranked by — cubeful when the rollout is
+     * cubeful, equity or MWC depending on match play, exactly as gnubg
+     * computes it for its own hint list. */
+    double score;
+} gnubgapi_rolled_move;
+
+/*
+ * Roll out candidate plays for a dice roll.
+ *
+ * Rolling out every legal play is usually not what a caller wants — a
+ * 3-1 opening has 15 of them and each costs a full rollout — so the
+ * moves are first evaluated at n_plies, ranked, and only the best
+ * max_moves are rolled out. Pass max_moves = 0 to roll out all of them,
+ * and know what you are asking for.
+ *
+ * That pre-ranking is the caller's lever, not a policy: n_plies chooses
+ * how good the shortlist is, max_moves chooses how long you wait.
+ *
+ * Results come back sorted best-first by the ROLLED-OUT score, which is
+ * generally not the order the n_plies evaluation produced — that
+ * reordering is the entire point of rolling out.
+ *
+ * out_moves must have room for max_moves entries (or GNUBGAPI_MAX_MOVES
+ * when max_moves is 0). out_count receives how many were rolled out.
+ */
+GNUBGAPI_EXPORT gnubgapi_status gnubgapi_rollout_moves(
+    gnubgapi_context *ctx,
+    const char *position_id,
+    const char *match_id,
+    int die1,
+    int die2,
+    uint32_t n_plies,
+    uint32_t max_moves,
+    const gnubgapi_rollout_settings *settings,
+    gnubgapi_rolled_move *out_moves,
+    uint32_t *out_count
+);
+
 
 /*
  * Generate all legal moves for a position and dice roll.
@@ -423,6 +470,37 @@ GNUBGAPI_EXPORT gnubgapi_status gnubgapi_evaluate_cube_decision(
     const char *match_id,
     uint32_t n_plies,
     gnubgapi_cube_decision_result *out
+);
+
+/*
+ * Roll out a cube decision.
+ *
+ * Rolls the position twice — once with the cube left alone and once with
+ * it doubled and taken — which is what makes a rolled-out cube decision
+ * different from rolling out the position: the same board is played on
+ * under two different cube states.
+ *
+ * settings may be NULL to use defaults. A cube rollout is always cubeful
+ * regardless of settings->cubeful; a cubeless cube decision is not a
+ * meaningful question and gnubg forces it internally.
+ *
+ * out_result receives the same shape gnubgapi_evaluate_cube_decision
+ * produces — cubeful_outputs, the 4 equities, and the decision — so a
+ * rolled-out cube action is a drop-in replacement for an evaluated one.
+ * The equities and decision come from gnubg's own FindCubeDecision
+ * applied to the rolled-out outputs, not from a second evaluation.
+ *
+ * out_std_dev is double[2][7], per-output standard deviations over the
+ * trials, rows in the same order as cubeful_outputs. It may be NULL if
+ * the caller does not want them.
+ */
+GNUBGAPI_EXPORT gnubgapi_status gnubgapi_rollout_cube(
+    gnubgapi_context *ctx,
+    const char *position_id,
+    const char *match_id,
+    const gnubgapi_rollout_settings *settings,
+    gnubgapi_cube_decision_result *out_result,
+    double out_std_dev[2][GNUBGAPI_NUM_ROLLOUT_OUTPUTS]
 );
 
 /* ------------------------------------------------------------------ */
